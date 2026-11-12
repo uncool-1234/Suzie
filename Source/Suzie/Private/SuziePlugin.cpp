@@ -21,6 +21,8 @@
 #include "Engine/NetConnection.h"
 #include "Misc/CommandLine.h"
 #include "Interfaces/IPluginManager.h"
+#include "Gen/SzProfile.h"
+#include "Gen/SzBakedGenerator.h"
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 3
 #include "UObject/PropertyOptional.h"
 #endif
@@ -33,10 +35,12 @@ void FSuziePluginModule::StartupModule()
 {
     UE_LOG(LogSuzie, Display, TEXT("Suzie plugin starting"));
 
-    // Fork switch: two generators must never both define /Script types.
+    // Fork switches:
     //  -DisableSuzie   : do nothing.
-    //  -SuzieGenerate  : generate; refused while GameNativeTypes is enabled and not disabled by -DisableGameNativeTypes.
-    //  default         : idle (generate only on explicit request), so the plugin can sit next to GameNativeTypes.
+    //  -SuzieGenerate  : generate. With a profile (-SuzieProfile=<name|dir>, or ModkitLocal.ini [Local] SuzieProfile=) the profile's
+    //                    baked types file is used; otherwise upstream behaviour (Content/DynamicClasses/*.jmap).
+    //                    Refused while a plugin listed in the profile's conflicting_plugins is enabled and not disabled by its switch.
+    //  default         : idle (generate only on explicit request), so the plugin can sit next to another generator.
     if (FParse::Param(FCommandLine::Get(), TEXT("DisableSuzie")))
     {
         UE_LOG(LogSuzie, Display, TEXT("Suzie disabled by -DisableSuzie"));
@@ -44,14 +48,28 @@ void FSuziePluginModule::StartupModule()
     }
     if (!FParse::Param(FCommandLine::Get(), TEXT("SuzieGenerate")))
     {
-        UE_LOG(LogSuzie, Display, TEXT("Suzie idle: class generation only runs with -SuzieGenerate (phase 3: load check only)"));
+        UE_LOG(LogSuzie, Display, TEXT("Suzie idle: class generation only runs with -SuzieGenerate"));
         return;
     }
-    const TSharedPtr<IPlugin> OtherGenerator = IPluginManager::Get().FindPlugin(TEXT("GameNativeTypes"));
-    if (OtherGenerator.IsValid() && OtherGenerator->IsEnabled() && !FParse::Param(FCommandLine::Get(), TEXT("DisableGameNativeTypes")))
+    FSzProfile Profile;
+    const bool bHaveProfile = FSzProfile::Load(Profile);
+    if (bHaveProfile)
     {
-        UE_LOG(LogSuzie, Error, TEXT("Suzie: -SuzieGenerate refused, GameNativeTypes is enabled and would generate the same types. Pass -DisableGameNativeTypes as well."));
-        return;
+        for (const FSzProfile::FConflict& Conflict : Profile.ConflictingPlugins)
+        {
+            const TSharedPtr<IPlugin> Other = IPluginManager::Get().FindPlugin(Conflict.Plugin);
+            if (Other.IsValid() && Other->IsEnabled() && (Conflict.DisableSwitch.IsEmpty() || !FParse::Param(FCommandLine::Get(), *Conflict.DisableSwitch)))
+            {
+                UE_LOG(LogSuzie, Error, TEXT("Suzie: -SuzieGenerate refused, plugin %s is enabled and would generate the same types. Pass -%s as well."), *Conflict.Plugin, *Conflict.DisableSwitch);
+                return;
+            }
+        }
+        if (!Profile.TypesFile.IsEmpty() && FPaths::FileExists(Profile.TypesFile) && !FParse::Param(FCommandLine::Get(), TEXT("SuzieUpstreamJmap")))
+        {
+            UE_LOG(LogSuzie, Display, TEXT("Suzie: profile '%s' (%s), generating from baked types %s"), *Profile.Id, *Profile.Dir, *Profile.TypesFile);
+            SuzieCommands::RunGenerateFromModule(Profile);
+            return;
+        }
     }
 
     ProcessAllJsonClassDefinitions();

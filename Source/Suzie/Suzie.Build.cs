@@ -25,6 +25,7 @@ public class Suzie : ModuleRules
 				"Engine",
 				"Blutility",
 				"Json",
+				"GameplayTags",
 				"UnrealEd",
 				"Projects",
 				"BlueprintGraph",
