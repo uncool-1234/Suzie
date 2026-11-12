@@ -1,6 +1,6 @@
 import unreal, os
-lst = [l.strip().split('|')[0] for l in open(os.environ["Game_LIST"]) if l.strip()]
-prog = os.environ["Game_PROG"]
+lst = [l.strip().split('|')[0] for l in open(os.environ["SUZIE_LIST"]) if l.strip()]
+prog = os.environ["SUZIE_PROG"]
 tools = unreal.AssetToolsHelpers.get_asset_tools()
 world = unreal.EditorLevelLibrary.get_editor_world()
 sphere = unreal.load_asset("/Engine/BasicShapes/Sphere")
