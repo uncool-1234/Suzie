@@ -19,6 +19,8 @@
 #include "UObject/UObjectAllocator.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Engine/NetConnection.h"
+#include "Misc/CommandLine.h"
+#include "Interfaces/IPluginManager.h"
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 3
 #include "UObject/PropertyOptional.h"
 #endif
@@ -30,6 +32,27 @@ DEFINE_LOG_CATEGORY(LogSuzie);
 void FSuziePluginModule::StartupModule()
 {
     UE_LOG(LogSuzie, Display, TEXT("Suzie plugin starting"));
+
+    // Fork switch: two generators must never both define /Script types.
+    //  -DisableSuzie   : do nothing.
+    //  -SuzieGenerate  : generate; refused while GameNativeTypes is enabled and not disabled by -DisableGameNativeTypes.
+    //  default         : idle (generate only on explicit request), so the plugin can sit next to GameNativeTypes.
+    if (FParse::Param(FCommandLine::Get(), TEXT("DisableSuzie")))
+    {
+        UE_LOG(LogSuzie, Display, TEXT("Suzie disabled by -DisableSuzie"));
+        return;
+    }
+    if (!FParse::Param(FCommandLine::Get(), TEXT("SuzieGenerate")))
+    {
+        UE_LOG(LogSuzie, Display, TEXT("Suzie idle: class generation only runs with -SuzieGenerate (phase 3: load check only)"));
+        return;
+    }
+    const TSharedPtr<IPlugin> OtherGenerator = IPluginManager::Get().FindPlugin(TEXT("GameNativeTypes"));
+    if (OtherGenerator.IsValid() && OtherGenerator->IsEnabled() && !FParse::Param(FCommandLine::Get(), TEXT("DisableGameNativeTypes")))
+    {
+        UE_LOG(LogSuzie, Error, TEXT("Suzie: -SuzieGenerate refused, GameNativeTypes is enabled and would generate the same types. Pass -DisableGameNativeTypes as well."));
+        return;
+    }
 
     ProcessAllJsonClassDefinitions();
 }
@@ -319,7 +342,9 @@ UClass* FSuziePluginModule::FindOrCreateUnregisteredClass(FDynamicClassGeneratio
     ConstructedClassObject->ClassWithin = UObject::StaticClass();
 #if (ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 5)
     // Added in 5.5, needs to be carried over from the parent class
+    PRAGMA_DISABLE_DEPRECATION_WARNINGS // TotalFieldCount is flagged engine-internal in 5.7; no public replacement
     ConstructedClassObject->TotalFieldCount = ParentClass->TotalFieldCount;
+    PRAGMA_ENABLE_DEPRECATION_WARNINGS
 #endif
 
     //Field with cpp type info only exists in editor, in shipping SetCppTypeInfoStatic is empty
@@ -443,7 +468,9 @@ UClass* FSuziePluginModule::FindOrCreateClass(FDynamicClassGenerationContext& Co
             NewClass->MinAlignment = FMath::Max(NewClass->MinAlignment, CreatedProperty->GetMinAlignment());
 #if (ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 5)
             // Added in 5.5, needs to be incremented for each new property added to the class
+            PRAGMA_DISABLE_DEPRECATION_WARNINGS
             NewClass->TotalFieldCount++;
+            PRAGMA_ENABLE_DEPRECATION_WARNINGS
 #endif
 
             // Add property into the constructor/destructor lists based on its flags
@@ -1371,7 +1398,7 @@ void FSuziePluginModule::PolymorphicClassConstructorInvocationHelper(const FObje
         // If no explicit archetype has been provided for this object construction, or archetype is a CDO of the current class, set it to the default object archetype instead
         // This will ensure that correct property values are copied from the CDO for all object properties and subobjects are created using correct templates and not their CDO values
         // This has to be done before we call the parent constructor and create any default subobjects
-        if ((ObjectInitializer.GetArchetype() == nullptr || ObjectInitializer.GetArchetype() == ObjectInitializer.GetClass()->ClassDefaultObject) && TopLevelClassConstructionData->DefaultObjectArchetype)
+        if ((ObjectInitializer.GetArchetype() == nullptr || ObjectInitializer.GetArchetype() == ObjectInitializer.GetClass()->GetDefaultObject(false)) && TopLevelClassConstructionData->DefaultObjectArchetype)
         {
             FObjectInitializerAccessStub* ObjectInitializerAccess = reinterpret_cast<FObjectInitializerAccessStub*>(&ObjectInitializer.Get());
             ObjectInitializerAccess->ObjectArchetype = TopLevelClassConstructionData->DefaultObjectArchetype;
