@@ -11,6 +11,7 @@
 #include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/CommandLine.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
@@ -55,7 +56,16 @@ namespace SuzieCommands
 void RunVerify(const FSzProfile* Profile, const TArray<FString>& Args)
 {
 	FString Tsv = Args.Num() > 0 ? Args[0] : (Profile ? Profile->UsmapTsv : FString());
-	FParse::Value(FCommandLine::Get(), TEXT("SuzieUsmapTsv="), Tsv);
+	if (!FParse::Value(FCommandLine::Get(), TEXT("SuzieUsmapTsv="), Tsv) && Args.Num() == 0)
+	{
+		FConfigFile Local; // machine local override: <Project>/ModkitLocal.ini [Local] UsmapTsv=
+		Local.Read(FPaths::ProjectDir() / TEXT("ModkitLocal.ini"));
+		FString FromLocal;
+		if (Local.GetString(TEXT("Local"), TEXT("UsmapTsv"), FromLocal) && !FromLocal.IsEmpty())
+		{
+			Tsv = FromLocal;
+		}
+	}
 	TMap<FString, TArray<FUsmapRow>> Usmap;
 	TArray<FString> Lines;
 	const bool bHaveTsv = FFileHelper::LoadFileToStringArray(Lines, *Tsv);

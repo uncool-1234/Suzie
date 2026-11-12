@@ -35,32 +35,45 @@ void FSuziePluginModule::StartupModule()
 {
     UE_LOG(LogSuzie, Display, TEXT("Suzie plugin starting"));
 
-    // Fork switches:
+    // Fork behaviour:
     //  -DisableSuzie   : do nothing.
-    //  -SuzieGenerate  : generate. With a profile (-SuzieProfile=<name|dir>, or ModkitLocal.ini [Local] SuzieProfile=) the profile's
-    //                    baked types file is used; otherwise upstream behaviour (Content/DynamicClasses/*.jmap).
-    //                    Refused while a plugin listed in the profile's conflicting_plugins is enabled and not disabled by its switch.
-    //  default         : idle (generate only on explicit request), so the plugin can sit next to another generator.
+    //  default         : if a profile is selected (-SuzieProfile=<name|dir>, ModkitLocal.ini [Local] SuzieProfile=, else the engine profile
+    //                    -ModkitProfile= / [Local] Profile= when that directory holds a profile.json) its baked types are generated at startup.
+    //                    A plugin listed in the profile's conflicting_plugins that is enabled (and not disabled by its switch) wins and Suzie idles.
+    //  -SuzieGenerate  : explicit request: errors instead of idling on a conflict; without a profile the upstream behaviour
+    //                    (Content/DynamicClasses/*.jmap) runs.
+    //  no profile and no -SuzieGenerate: idle, so the plugin can sit in a project without a game.
     if (FParse::Param(FCommandLine::Get(), TEXT("DisableSuzie")))
     {
         UE_LOG(LogSuzie, Display, TEXT("Suzie disabled by -DisableSuzie"));
         return;
     }
-    if (!FParse::Param(FCommandLine::Get(), TEXT("SuzieGenerate")))
-    {
-        UE_LOG(LogSuzie, Display, TEXT("Suzie idle: class generation only runs with -SuzieGenerate"));
-        return;
-    }
+    const bool bExplicit = FParse::Param(FCommandLine::Get(), TEXT("SuzieGenerate"));
     FSzProfile Profile;
-    const bool bHaveProfile = FSzProfile::Load(Profile);
-    if (bHaveProfile)
+    const bool bHaveProfile = FSzProfile::Load(Profile, /*bQuiet*/ !bExplicit);
+    if (!bHaveProfile)
+    {
+        if (!bExplicit)
+        {
+            UE_LOG(LogSuzie, Display, TEXT("Suzie idle: no profile selected (-SuzieProfile=, or Profile= in ModkitLocal.ini) and no -SuzieGenerate"));
+            return;
+        }
+    }
+    else
     {
         for (const FSzProfile::FConflict& Conflict : Profile.ConflictingPlugins)
         {
             const TSharedPtr<IPlugin> Other = IPluginManager::Get().FindPlugin(Conflict.Plugin);
             if (Other.IsValid() && Other->IsEnabled() && (Conflict.DisableSwitch.IsEmpty() || !FParse::Param(FCommandLine::Get(), *Conflict.DisableSwitch)))
             {
-                UE_LOG(LogSuzie, Error, TEXT("Suzie: -SuzieGenerate refused, plugin %s is enabled and would generate the same types. Pass -%s as well."), *Conflict.Plugin, *Conflict.DisableSwitch);
+                if (bExplicit)
+                {
+                    UE_LOG(LogSuzie, Error, TEXT("Suzie: -SuzieGenerate refused, plugin %s is enabled and would generate the same types. Pass -%s as well."), *Conflict.Plugin, *Conflict.DisableSwitch);
+                }
+                else
+                {
+                    UE_LOG(LogSuzie, Display, TEXT("Suzie idle: plugin %s is enabled and generates the types of profile '%s' (remove it, or pass -%s)"), *Conflict.Plugin, *Profile.Id, *Conflict.DisableSwitch);
+                }
                 return;
             }
         }
@@ -68,6 +81,11 @@ void FSuziePluginModule::StartupModule()
         {
             UE_LOG(LogSuzie, Display, TEXT("Suzie: profile '%s' (%s), generating from baked types %s"), *Profile.Id, *Profile.Dir, *Profile.TypesFile);
             SuzieCommands::RunGenerateFromModule(Profile);
+            return;
+        }
+        if (!bExplicit)
+        {
+            UE_LOG(LogSuzie, Warning, TEXT("Suzie idle: profile '%s' has no baked types file (%s); run the baker (Profiles/%s/tools) or pass -SuzieGenerate for the upstream jmap route"), *Profile.Id, *Profile.TypesFile, *Profile.Id);
             return;
         }
     }

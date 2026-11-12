@@ -7,6 +7,11 @@
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 #include "Serialization/AsyncLoadingEvents.h"
+#include "Features/IModularFeatures.h"
+#include "Misc/CommandLine.h"
+#include "Modules/ModuleManager.h"
+#include "SuzieExtension.h"
+#include "Misc/Parse.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "UObject/Class.h"
@@ -19,8 +24,20 @@
 #if __has_include("UObject/UnversionedSchemaOverride.h")
 #include "UObject/UnversionedSchemaOverride.h"
 #define SUZIE_HAS_SCHEMA_OVERRIDE 1
+#if defined(UE_MODKIT_SCHEMA_HOOK_LEVEL) && UE_MODKIT_SCHEMA_HOOK_LEVEL >= 2
+#define SUZIE_HAS_HOOK_LEVEL2 1 // post-serialize handlers, generated struct registry (row structs keep their super with the engine DataTable guard)
+#else
+#define SUZIE_HAS_HOOK_LEVEL2 0
+#endif
+#if defined(UE_MODKIT_SCHEMA_HOOK_LEVEL) && UE_MODKIT_SCHEMA_HOOK_LEVEL >= 3
+#define SUZIE_HAS_HOOK_LEVEL3 1 // discarded shadow properties are read like live ones (integer-like values as integers)
+#else
+#define SUZIE_HAS_HOOK_LEVEL3 0
+#endif
 #else
 #define SUZIE_HAS_SCHEMA_OVERRIDE 0
+#define SUZIE_HAS_HOOK_LEVEL2 0
+#define SUZIE_HAS_HOOK_LEVEL3 0
 #endif
 #include "Serialization/ArchiveUObject.h"
 #include "UObject/UObjectIterator.h"
@@ -619,6 +636,7 @@ public:
 
 	TMap<FString, FJObj> StructDefs;
 	TArray<FString> StructOrder;
+	bool bWarnedNoRowGuard = false;
 
 	void MakeStructShell(const FJObj& Def)
 	{
@@ -633,7 +651,22 @@ public:
 		UPackage* Pkg = GetPackage(PackageOfPath(Path));
 		UScriptStruct* S = NewObject<UScriptStruct>(Pkg, FName(*LeafOfPath(Path)), RF_Public | RF_Standalone);
 		FString Sup;
-		if (Def->TryGetStringField(TEXT("sup"), Sup) && !Sup.IsEmpty() && !Profile->DropStructSupers.Contains(Sup))
+		bool bDropSuper = false;
+		if (Def->TryGetStringField(TEXT("sup"), Sup))
+		{
+			bDropSuper = Profile->DropStructSupers.Contains(Sup);
+			if (!bDropSuper && !Profile->RowStructBase.IsEmpty() && Sup == Profile->RowStructBase && !(Profile->bRowStructKeepSuper && SUZIE_HAS_HOOK_LEVEL2))
+			{
+				// row_struct policy: keep_super_guarded needs the engine DataTable guard; without it (or in drop_super mode) rows lose the super
+				bDropSuper = true;
+				if (Profile->bRowStructKeepSuper && !bWarnedNoRowGuard)
+				{
+					bWarnedNoRowGuard = true;
+					UE_LOG(LogSuzie, Warning, TEXT("Profile asks for keep_super_guarded row structs but the engine has no generated-struct hook (UE_MODKIT_SCHEMA_HOOK_LEVEL >= 2): dropping the row super"));
+				}
+			}
+		}
+		if (!Sup.IsEmpty() && !bDropSuper)
 		{
 			// (profile policy structs.drop_super: a base with a vtable and no properties has no C++ constructor to set the vptr for a
 			// generated struct, so engine code calling a virtual on it would crash; generated structs then simply do not derive from it.)
@@ -651,6 +684,9 @@ public:
 		S->StructFlags = (EStructFlags)((uint32)HexField(Def, TEXT("fl")) & Keep);
 		S->AddToRoot();
 		Made.Add(Path, S);
+#if SUZIE_HAS_HOOK_LEVEL2
+		UE::NativeSerialize::AddGeneratedStruct(S);
+#endif
 	}
 
 	void FillStruct(const FJObj& Def)
@@ -1007,8 +1043,16 @@ public:
 		{
 			return;
 		}
-		int32 Types = 0, Shadows = 0, Skipped = 0;
+		int32 Types = 0, Shadows = 0, Skipped = 0, Forced = 0;
 		UObject* ShadowOwner = GetTransientPackage();
+		// -SuzieForceShadowMarked: recipe entries marked "fk" (members a modified engine tree carries as real code) are read through shadow
+		// properties even when a live property matches. Validation aid for removing such members from engine headers: the schema then
+		// reads exactly as it will with the members gone, while the (still compiled) members keep their default values.
+		FString ForceList; // -SuzieForceShadowMarked=TypeA+TypeB.Member restricts the forcing to those types (leaf names), for bisecting
+		FParse::Value(FCommandLine::Get(), TEXT("SuzieForceShadowMarked="), ForceList);
+		TArray<FString> ForceTypes;
+		ForceList.ParseIntoArray(ForceTypes, TEXT("+")); // FParse stops values at a comma, so the list is separated by +
+		const bool bForceShadowMarked = FParse::Param(FCommandLine::Get(), TEXT("SuzieForceShadowMarked")) || ForceTypes.Num() > 0;
 		for (const TSharedPtr<FJsonValue>& V : D->GetArrayField(TEXT("types")))
 		{
 			FJObj T = V->AsObject();
@@ -1046,6 +1090,11 @@ public:
 				FRecipeEntry E;
 				E.Dim = FMath::Max(1, (int32)Dim);
 				FProperty** L = Live.Find(Name);
+				if (L && bForceShadowMarked && PJ->HasField(TEXT("fk")) && (ForceTypes.Num() == 0 || ForceTypes.Contains(LeafOfPath(Path)) || ForceTypes.Contains(LeafOfPath(Path) + TEXT(".") + Name)))
+				{
+					L = nullptr;
+					Forced++;
+				}
 				if (L && (*L)->GetClass()->GetName() == Type && (*L)->ArrayDim == E.Dim)
 				{
 					bool bSameStruct = true;
@@ -1061,7 +1110,28 @@ public:
 					}
 				}
 				bool bBuilt = true;
-				FProperty* P = BuildProp(ShadowOwner, PJ, Path, bBuilt);
+				// A discarded shadow is read with SerializeItem, which reads a byte/enum property that has an enum BY NAME; the unversioned
+				// format stores the raw integer (what a live property reads). Engines whose discard path reads integer-like values like live
+				// properties (UE_MODKIT_SCHEMA_HOOK_LEVEL >= 3) do not need this; for older ones a top-level enum shadow becomes the plain
+				// integer property of the same size, which consumes exactly the same bytes.
+				FJObj ShadowDef = PJ;
+#if !SUZIE_HAS_HOOK_LEVEL3
+				if (Type == TEXT("EnumProperty") || (Type == TEXT("ByteProperty") && PJ->HasField(TEXT("en"))))
+				{
+					ShadowDef = MakeShared<FJsonObject>();
+					for (const TPair<FString, TSharedPtr<FJsonValue>>& KV : PJ->Values)
+					{
+						ShadowDef->Values.Add(KV.Key, KV.Value);
+					}
+					ShadowDef->RemoveField(TEXT("en"));
+					if (Type == TEXT("EnumProperty"))
+					{
+						ShadowDef->SetStringField(TEXT("t"), StrField(PJ, TEXT("u")));
+						ShadowDef->RemoveField(TEXT("u"));
+					}
+				}
+#endif
+				FProperty* P = BuildProp(ShadowOwner, ShadowDef, Path, bBuilt);
 				if (!P || !bBuilt)
 				{
 					UE_LOG(LogSuzie, Warning, TEXT("Engine diff %s: cannot build shadow for %s, type not overridden"), *Path, *Name);
@@ -1087,7 +1157,8 @@ public:
 			GRecipes.Add(S, MoveTemp(Recipe));
 		}
 		Stats.OverrideTypes = Types; Stats.OverrideShadows = Shadows; Stats.OverrideSkipped = Skipped;
-		UE_LOG(LogSuzie, Log, TEXT("Schema overrides: %d types, %d shadow properties, %d skipped"), Types, Shadows, Skipped);
+		UE_LOG(LogSuzie, Log, TEXT("Schema overrides: %d types, %d shadow properties, %d skipped%s"), Types, Shadows, Skipped,
+			bForceShadowMarked ? *FString::Printf(TEXT(" (%d marked entries forced to shadows)"), Forced) : TEXT(""));
 #if SUZIE_HAS_SCHEMA_OVERRIDE
 		UE::UnversionedSchema::SetOverrideProvider(&SzSchemaOverrideProvider);
 		UE::UnversionedSchema::FlushAllUnversionedSchemas();
@@ -1095,6 +1166,40 @@ public:
 	}
 
 	// ------------------------------------------------------------------ driver
+
+	FSzExtensionRegistry ExtReg;
+
+	/** Loads the profile's game extension module (if any), lets it register its named ops/handlers and defers the struct ops the profile binds. */
+	void LoadExtension()
+	{
+		if (!Profile->ExtensionModule.IsEmpty())
+		{
+			if (!FModuleManager::Get().LoadModule(*Profile->ExtensionModule))
+			{
+				UE_LOG(LogSuzie, Error, TEXT("Profile '%s': extension module %s could not be loaded; native struct ops and post-serialize handlers are unavailable"), *Profile->Id, *Profile->ExtensionModule);
+			}
+		}
+		const FName Id(*Profile->Id);
+		for (ISuzieGameExtension* Ext : IModularFeatures::Get().GetModularFeatureImplementations<ISuzieGameExtension>(ISuzieGameExtension::GetModularFeatureName()))
+		{
+			if (Ext->GetProfileId() == Id)
+			{
+				Ext->Register(ExtReg);
+			}
+		}
+		for (const TPair<FString, FString>& Op : Profile->NativeStructOps)
+		{
+			const TFunction<UScriptStruct::ICppStructOps*()>* Make = ExtReg.StructOps.Find(FName(*Op.Value));
+			if (!Make)
+			{
+				UE_LOG(LogSuzie, Error, TEXT("native_ops %s -> %s: not registered by the extension, the struct is generated as a plain script struct"), *Op.Key, *Op.Value);
+				continue;
+			}
+			UScriptStruct::DeferCppStructOps(FTopLevelAssetPath(Op.Key), (*Make)());
+			Stats.NativeStructOps++;
+			UE_LOG(LogSuzie, Log, TEXT("Native struct ops %s for %s"), *Op.Value, *Op.Key);
+		}
+	}
 
 	bool Run(const FString& File)
 	{
@@ -1126,6 +1231,7 @@ public:
 		const TArray<TSharedPtr<FJsonValue>>* Delegates = nullptr;
 		Root->TryGetArrayField(TEXT("delegates"), Delegates);
 
+		LoadExtension();
 		for (const auto& V : Enums) MakeEnum(V->AsObject());
 
 		// class shells, super first (file order)
@@ -1194,6 +1300,21 @@ public:
 		// classes (super first)
 		for (const auto& V : Classes) FillClass(V->AsObject());
 
+#if SUZIE_HAS_HOOK_LEVEL2
+		for (const FSzProfile::FPostSerialize& H : Profile->PostSerializeHandlers)
+		{
+			const FSzPostSerializeFn* Fn = ExtReg.PostSerialize.Find(FName(*H.Handler));
+			UClass* C = Resolve<UClass>(H.Class);
+			if (!Fn || !C)
+			{
+				UE_LOG(LogSuzie, Error, TEXT("post_serialize %s -> %s: %s"), *H.Class, *H.Handler, !Fn ? TEXT("handler not registered by the extension") : TEXT("class not found"));
+				continue;
+			}
+			UE::NativeSerialize::AddPostSerialize(C, *Fn);
+			Stats.PostSerializeHandlers++;
+			UE_LOG(LogSuzie, Log, TEXT("Post-serialize handler %s on %s"), *H.Handler, *H.Class);
+		}
+#endif
 #if SUZIE_HAS_SCHEMA_OVERRIDE
 		for (const FString& SkipPath : Profile->SkipClasses)
 		{

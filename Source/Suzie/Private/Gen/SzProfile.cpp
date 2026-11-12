@@ -51,6 +51,22 @@ bool FSzProfile::Load(FSzProfile& Out, bool bQuiet)
 	Spec = Spec.TrimQuotes().TrimStartAndEnd();
 	if (Spec.IsEmpty())
 	{
+		// No explicit Suzie profile: use the engine profile directory (-ModkitProfile= / ModkitLocal.ini [Local] Profile=) when it is a Suzie profile too.
+		FString EngineProfile;
+		if (!FParse::Value(FCommandLine::Get(), TEXT("ModkitProfile="), EngineProfile))
+		{
+			FConfigFile Local;
+			Local.Read(FPaths::ProjectDir() / TEXT("ModkitLocal.ini"));
+			Local.GetString(TEXT("Local"), TEXT("Profile"), EngineProfile);
+		}
+		EngineProfile = EngineProfile.TrimQuotes().TrimStartAndEnd();
+		if (!EngineProfile.IsEmpty() && FPaths::FileExists(FPaths::ConvertRelativePathToFull(EngineProfile) / TEXT("profile.json")))
+		{
+			Spec = EngineProfile;
+		}
+	}
+	if (Spec.IsEmpty())
+	{
 		return false;
 	}
 	FString Dir = Spec;
@@ -76,6 +92,23 @@ bool FSzProfile::Load(FSzProfile& Out, bool bQuiet)
 	if (P->TryGetStringField(TEXT("types"), S)) Out.TypesFile = Resolve(Dir, S);
 	if (P->TryGetStringField(TEXT("engine_diff"), S)) Out.EngineDiffFile = Resolve(Dir, S);
 	if (P->TryGetStringField(TEXT("skip"), S)) Out.SkipFile = Resolve(Dir, S);
+	P->TryGetStringField(TEXT("extension_module"), Out.ExtensionModule);
+	if (P->TryGetStringField(TEXT("native_ops"), S))
+	{
+		if (const TSharedPtr<FJsonObject> O = ReadJson(Resolve(Dir, S)))
+		{
+			const TArray<TSharedPtr<FJsonValue>>* Ops;
+			if (O->TryGetArrayField(TEXT("structs"), Ops))
+			{
+				for (const TSharedPtr<FJsonValue>& V : *Ops)
+				{
+					const TSharedPtr<FJsonObject> E = V->AsObject();
+					FString Path, OpsName;
+					if (E.IsValid() && E->TryGetStringField(TEXT("path"), Path) && E->TryGetStringField(TEXT("ops"), OpsName)) Out.NativeStructOps.Add(Path, OpsName);
+				}
+			}
+		}
+	}
 	if (P->TryGetStringField(TEXT("tags"), S)) Out.TagsFile = Resolve(Dir, S);
 	const TSharedPtr<FJsonObject>* Verify;
 	if (P->TryGetObjectField(TEXT("verify"), Verify) && (*Verify)->TryGetStringField(TEXT("usmap_tsv"), S)) Out.UsmapTsv = Resolve(Dir, S);
@@ -107,6 +140,14 @@ bool FSzProfile::Load(FSzProfile& Out, bool bQuiet)
 			{
 				for (const TSharedPtr<FJsonValue>& V : *Arr) Out.DropStructSupers.Add(V->AsString());
 			}
+			const TSharedPtr<FJsonObject>* Row;
+			if (O->TryGetObjectField(TEXT("structs"), St) && (*St)->TryGetObjectField(TEXT("row_struct"), Row))
+			{
+				FString Mode;
+				(*Row)->TryGetStringField(TEXT("base"), Out.RowStructBase);
+				(*Row)->TryGetStringField(TEXT("mode"), Mode);
+				Out.bRowStructKeepSuper = Mode == TEXT("keep_super_guarded");
+			}
 		}
 	}
 	if (P->TryGetStringField(TEXT("aliases"), S))
@@ -131,6 +172,14 @@ bool FSzProfile::Load(FSzProfile& Out, bool bQuiet)
 				{
 					FString C;
 					if (V->AsObject().IsValid() && V->AsObject()->TryGetStringField(TEXT("class"), C)) Out.SkipClasses.Add(C);
+				}
+			}
+			if (O->TryGetArrayField(TEXT("post_serialize"), Arr))
+			{
+				for (const TSharedPtr<FJsonValue>& V : *Arr)
+				{
+					FSzProfile::FPostSerialize H;
+					if (V->AsObject().IsValid() && V->AsObject()->TryGetStringField(TEXT("class"), H.Class) && V->AsObject()->TryGetStringField(TEXT("handler"), H.Handler)) Out.PostSerializeHandlers.Add(H);
 				}
 			}
 		}

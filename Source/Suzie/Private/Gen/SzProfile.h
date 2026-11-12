@@ -19,11 +19,17 @@ struct FSzProfile
 	// policy (overrides.json)
 	TArray<FString> AbstractIfDerivedFrom; // generated classes deriving from one of these are marked Abstract
 	TArray<FString> DropStructSupers;      // struct super paths that are never applied to generated structs
+	FString RowStructBase;                 // structs.row_struct.base (e.g. the engine's table row base)
+	bool bRowStructKeepSuper = false;      // structs.row_struct.mode == keep_super_guarded: generated row structs keep the super (needs the engine DataTable guard)
 	// aliases.json
 	TMap<FString, FString> Aliases;        // game type path -> editor type path
 	bool bAliasByLeaf = false;             // opt-in: unresolved path may be found by leaf name in any /Script package
 
 	TArray<FString> SkipClasses;
+	struct FPostSerialize { FString Class; FString Handler; };
+	TArray<FPostSerialize> PostSerializeHandlers;  // load/skip.json post_serialize: class -> handler name provided by the extension
+	TMap<FString, FString> NativeStructOps;        // load/native_ops.json: struct path -> ops name provided by the extension
+	FString ExtensionModule;                       // profile.json extension_module: game plugin module loaded before generation
 	FString ProbeTag;
 	FString TagsIni;                       // project relative
 

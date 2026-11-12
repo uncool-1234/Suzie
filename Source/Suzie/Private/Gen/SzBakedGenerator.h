@@ -13,6 +13,7 @@ struct FSzGenStats
 	int32 Delegates = 0, Functions = 0, Properties = 0;
 	int32 Unresolved = 0;
 	int32 OverrideTypes = 0, OverrideShadows = 0, OverrideSkipped = 0;
+	int32 NativeStructOps = 0, PostSerializeHandlers = 0;
 	double Seconds = 0.0;
 };
 
