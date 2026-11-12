@@ -5,3 +5,5 @@ __pycache__/
 /Profiles/*/data/*.tsv
 /Profiles/*/data/stock_info.json
 /Profiles/*/data/cache/
+/Profiles/*/Plugin/*/Binaries
+/Profiles/*/Plugin/*/Intermediate

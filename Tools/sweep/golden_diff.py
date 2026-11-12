@@ -20,8 +20,12 @@ def blocks(path):
     return out
 
 ap = argparse.ArgumentParser(); ap.add_argument('old'); ap.add_argument('new'); ap.add_argument('--whitelist'); ap.add_argument('--show', type=int, default=3)
+ap.add_argument('--structure', action='store_true', help='ignore sizes, offsets, element sizes and property flags (layout shifts of generated types that derive from engine types whose members were removed)')
 a = ap.parse_args()
 O, N = blocks(a.old), blocks(a.new)
+if a.structure:
+    norm = lambda L: [re.sub(r'\s(size|off|es)=\d+', '', re.sub(r'(\sP .*?)\sfl=[0-9a-f]+', r'', l)) for l in L]
+    O = {k: norm(v) for k, v in O.items()}; N = {k: norm(v) for k, v in N.items()}
 wl = set()
 if a.whitelist:
     for l in open(a.whitelist, encoding='utf8'):
