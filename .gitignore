@@ -7,3 +7,4 @@ __pycache__/
 /Profiles/*/data/cache/
 /Profiles/*/Plugin/*/Binaries
 /Profiles/*/Plugin/*/Intermediate
+/ModkitLocal.ini
