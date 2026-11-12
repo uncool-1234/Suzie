@@ -1,3 +1,7 @@
 /Binaries
 /Intermediate
 /Profiles/*/data/bake/*.json
+__pycache__/
+/Profiles/*/data/*.tsv
+/Profiles/*/data/stock_info.json
+/Profiles/*/data/cache/
