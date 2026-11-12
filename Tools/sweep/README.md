@@ -1,6 +1,14 @@
-Sweep harness (copies of the scripts used for the standalone generator; machine paths are those of the dev PC).
+Sweep harness (machine independent: nothing here contains a path of the dev PC).
 
-- `golden.ps1 -Tag t -Out file -Extra "-SuzieGenerate -SuzieProfile=Game ..."`: one editor start, `golden.py` runs verify + tag probe + `Suzie.DumpAll`.
-- `runlist.ps1 -list <plain asset list> -tag t` with env `Game_EXTRA="-SuzieGenerate -SuzieProfile=Game -DisableGameNativeTypes"`:
-  Blueprint/AnimBP/Widget load sweep (list: `Profiles/Game/sweeps/blueprints_531.list`, strip the `|Type` suffix first); `make_sweep_csv.py <tag> <out.csv>` classifies CLEAN/DIRTY/CRASH.
-- `sweep.ps1` + `sweep.py`: material / MIC sweep (list `Profiles/Game/sweeps/materials_200.list`); the copy writes next to the original, edit `$logdir`/output paths before use.
+Common arguments: `-Project <path to the .uproject>` (or env `MODKIT_PROJECT`), `-Extra "<more editor args>"`, `-OutDir <dir>` (default `<ProjectDir>\Saved\SuzieSweeps`).
+The engine comes from `[Local] EngineDir=` of `<ProjectDir>\ModkitLocal.ini` (else the path in the .uproject `EngineAssociation`), the key file from `[Local] KeyFile=`
+(only its path is passed as `-ModkitKeyFile=`). The DDC is isolated per project (`<ProjectDir>\DDC`). One editor at a time (GPU, DDC, project lock).
+
+- `run_gates.ps1 -Tag t [-OldGolden file]`: golden dump + Blueprint sweep + material sweep, writes `<Tag>.summary.json`.
+- `golden.ps1 -Tag t -Out file`: one editor start, `golden.py` runs verify + tag probe + `Suzie.DumpAll`. `golden_diff.py old new [--structure] [--whitelist file]`
+  compares two dumps block by block (`--structure` ignores sizes/offsets/flags); exit code 1 when a difference is not whitelisted.
+- `runlist.ps1 -list <asset list> -tag t`: Blueprint/AnimBP/Widget load sweep in one editor session (restarts after a crash and records the culprit); the list may have `|Type` suffixes
+  (`Profiles/Game/sweeps/blueprints_531.list`). `make_sweep_csv.py <tag> <out.csv> --dir <OutDir> --list <list>` classifies CLEAN / DIRTY (loads, error lines in its slice) / CRASH.
+- `sweep.ps1 -list <asset|class list> -tag t`: material / MIC sweep (create a MIC, assign it to a mesh, render offscreen; `Profiles/Game/sweeps/materials_200.list`).
+- `dt_run.ps1 -Tag t -Max 300`: loads random DataTable assets from the asset registry (`dt_test.py`), restarts after a crash and excludes the culprit.
+- Validation of shadow recipes: `-Extra "-SuzieForceShadowMarked"` reads the members that a legacy engine still carried through shadows, `-SuzieForceShadowMarked=Type+Type.Member` restricts it.

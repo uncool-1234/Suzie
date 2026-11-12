@@ -3,6 +3,7 @@
 # Env: SUZIE_DT_MAX (default 300), SUZIE_DT_OUT (result file). Exits the editor when done; a missing DONE line means a crash.
 import unreal, os, random
 mx = int(os.environ.get("SUZIE_DT_MAX", "300")); out = os.environ["SUZIE_DT_OUT"]
+excl = set(l.strip() for l in open(os.environ["SUZIE_DT_EXCLUDE"])) if os.environ.get("SUZIE_DT_EXCLUDE") and os.path.exists(os.environ["SUZIE_DT_EXCLUDE"]) else set()
 def mark(s):
     with open(out, "a") as f: f.write(s + "\n"); f.flush(); os.fsync(f.fileno())
 reg = unreal.AssetRegistryHelpers.get_asset_registry()
@@ -10,6 +11,7 @@ flt = unreal.ARFilter(class_paths=[unreal.TopLevelAssetPath("/Script/Engine", "D
 assets = list(reg.get_assets(flt))
 mark("FOUND|%d" % len(assets))
 random.seed(7); random.shuffle(assets)
+assets = [a for a in assets if str(a.package_name) not in excl]
 ok = fail = 0; structs = {}
 for a in assets[:mx]:
     pk = str(a.package_name)
