@@ -11,7 +11,7 @@ function Get-SweepEnv($Project) {
   $dir = Split-Path -Parent (Resolve-Path $Project)
   $loc = Read-Ini (Join-Path $dir 'ModkitLocal.ini')
   $engine = $loc['EngineDir']
-  if (-not $engine) { $ea = (Get-Content $Project -Raw | ConvertFrom-Json).EngineAssociation; if ($ea -and (Test-Path $ea)) { $engine = $ea } }
+  if (-not $engine) { $ea = (Get-Content $Project -Raw | ConvertFrom-Json).EngineAssociation; if ($ea) { if (-not [IO.Path]::IsPathRooted($ea)) { $ea = Join-Path $dir $ea }; if (Test-Path $ea) { $engine = (Resolve-Path $ea).Path } } }
   if (-not $engine) { throw 'engine dir unknown: set EngineDir= in ModkitLocal.ini or use a path as EngineAssociation' }
   $name = [IO.Path]::GetFileNameWithoutExtension($Project)
   $args = @('-log', '-d3d12', '-sm5', '-nosplash', '-unattended')
