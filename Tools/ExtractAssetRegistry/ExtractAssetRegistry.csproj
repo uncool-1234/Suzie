@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+  <!-- CUE4Parse checkout: set -p:CUE4ParseDir=<path of the CUE4Parse repo> (default: sibling folder of the Suzie checkout) -->
+  <PropertyGroup><CUE4ParseDir Condition="'$(CUE4ParseDir)'==''">$(MSBuildThisFileDirectory)..\..\..\CUE4Parse</CUE4ParseDir></PropertyGroup>
+  <ItemGroup><ProjectReference Include="$(CUE4ParseDir)\CUE4Parse\CUE4Parse.csproj" /></ItemGroup>
+</Project>

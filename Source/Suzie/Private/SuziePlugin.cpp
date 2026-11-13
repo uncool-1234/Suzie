@@ -1,4 +1,7 @@
 #include "SuziePlugin.h"
+#include "Runtime/Launch/Resources/Version.h"
+#include "EdGraphSchema_K2.h"
+#include "UObject/TextProperty.h"
 #include "Misc/FileHelper.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"

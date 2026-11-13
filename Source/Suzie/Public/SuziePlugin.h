@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
+#include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
 #include "Styling/SlateStyle.h"
 #include "Framework/Commands/UICommandList.h"
 
