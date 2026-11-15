@@ -1046,8 +1046,8 @@ public:
 		int32 Types = 0, Shadows = 0, Skipped = 0, Forced = 0;
 		UObject* ShadowOwner = GetTransientPackage();
 		// -SuzieForceShadowMarked: recipe entries marked "fk" (members a modified engine tree carries as real code) are read through shadow
-		// properties even when a live property matches. Validation aid for removing such members from engine headers: the schema then
-		// reads exactly as it will with the members gone, while the (still compiled) members keep their default values.
+		// properties even when a live property matches. Validation aid: the schema reads as it would with those members absent from the engine
+		// headers, while the compiled members keep their default values.
 		FString ForceList; // -SuzieForceShadowMarked=TypeA+TypeB.Member restricts the forcing to those types (leaf names), for bisecting
 		FParse::Value(FCommandLine::Get(), TEXT("SuzieForceShadowMarked="), ForceList);
 		TArray<FString> ForceTypes;

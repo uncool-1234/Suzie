@@ -66,23 +66,16 @@ git clone https://github.com/trumank/Suzie
 
 ---
 
-## Fork additions (local fork, not upstream)
+## Profile driven generator (this repository)
 
-This copy adds a generic, profile driven generator next to the upstream jmap route. Everything game specific lives in a **profile** directory
-(`Profiles/<Game>/`); `Source/` contains no game names (`Tools/check-layers.ps1`).
+Next to the jmap route above, `Source/Suzie/Private/Gen` contains a generic, profile driven generator. Everything game specific lives in a **profile** directory (`Profiles/<Game>/`); `Source/` contains no game names (`Tools/check-layers.ps1`).
 
-- **Baked types**: `Tools/` and the profile's baker turn a jmap into one compact JSON (types, functions, properties with exact flags, struct sizes,
-  interfaces, default subobjects, CDO deltas). Suzie generates enums/structs/classes/delegates from it in about 1.5 s (`Suzie.GenerateNativeTypes`).
-- **Selecting a profile**: `<Project>/ModkitLocal.ini [Local] Profile=<dir>` (or `-SuzieProfile=<name|dir>`). With a profile selected, generation runs at
-  startup without any switch, unless a plugin listed in the profile's `conflicting_plugins` is enabled. `-DisableSuzie` turns it off. Without a profile
-  Suzie idles (and `-SuzieGenerate` still runs the upstream jmap route).
-- **Shadow recipes**: engine types whose game layout differs (members the engine lacks) are described in `schema/engine_diff.json`; the engine's
-  unversioned schema hook reads such members into a temporary and discards them, so engine headers stay stock. Needs the `modkit-core` engine branch
-  (`UObject/UnversionedSchemaOverride.h`); without it the plugin still compiles (the hooks are probed at compile time).
-- **Game extension** (`SuzieExtension.h`): the few things that cannot be data, a struct with hand written serialization and handlers for data a game
-  appends after the reflected part of an export, come from a small plugin module named by the profile (`extension_module`), bound by name in
-  `load/native_ops.json` and `load/skip.json`.
-- **Verification**: `Suzie.VerifyNativeTypes`, `Suzie.DumpClass`, `Suzie.DumpAll` (canonical golden dump, `Tools/sweep/golden_diff.py`), `Suzie.TagInfo`,
-  and the sweep harness in `Tools/sweep` (`run_gates.ps1`, machine independent: project and engine come from `ModkitLocal.ini`).
+- **Baked types**: the profile's baker turns a jmap into one compact JSON (types, functions, properties with exact flags, struct sizes, interfaces, default subobjects, CDO deltas). Suzie generates enums, structs, classes and delegates from it in about 1.5 s (`Suzie.GenerateNativeTypes`).
+- **Selecting a profile**: `<Project>/ModkitLocal.ini [Local] Profile=<profile folder>` (the folder that holds `profile.json` and `engine.ini`) or `-SuzieProfile=<name|dir>`. With a profile selected, generation runs at startup without a switch, unless a plugin listed in the profile's `conflicting_plugins` is enabled. `-DisableSuzie` turns it off. Without a profile Suzie idles (`-SuzieGenerate` still runs the jmap route).
+- **Shadow recipes**: engine types whose game layout differs are described in `schema/engine_diff.json`; the engine's unversioned schema hook reads the members the engine lacks into a temporary and discards them. This needs the `modkit-core` engine branch (`UObject/UnversionedSchemaOverride.h`); without it the plugin still compiles (the hooks are probed at compile time).
+- **Game extension** (`SuzieExtension.h`): code that cannot be data (a struct with hand written serialization, handlers for data a game appends after the reflected part of an export) comes from a small plugin module named by the profile (`extension_module`), bound by name in `load/native_ops.json` and `load/skip.json`.
+- **Verification**: `Suzie.VerifyNativeTypes`, `Suzie.DumpClass`, `Suzie.DumpAll`, `Suzie.TagInfo`, and the sweep harness in `Tools/sweep`.
 
-License: MIT, unchanged (see LICENSE and NOTICE of the upstream project).
+Documentation lives in the workspace folder `<path>` (`profile-format.md`, `native-type-generation.md`, `schema-shadow-properties.md`).
+
+License: MIT (see LICENSE and NOTICE of the upstream project).

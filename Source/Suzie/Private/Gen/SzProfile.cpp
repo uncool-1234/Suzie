@@ -1,4 +1,4 @@
-// Fork addition (generic, game agnostic).
+// Generic, game agnostic.
 #include "SzProfile.h"
 #include "SuziePlugin.h"
 #include "Dom/JsonObject.h"

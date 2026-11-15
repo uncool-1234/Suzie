@@ -11,4 +11,4 @@ The engine comes from `[Local] EngineDir=` of `<ProjectDir>\ModkitLocal.ini` (el
   (`Profiles/Game/sweeps/blueprints_531.list`). `make_sweep_csv.py <tag> <out.csv> --dir <OutDir> --list <list>` classifies CLEAN / DIRTY (loads, error lines in its slice) / CRASH.
 - `sweep.ps1 -list <asset|class list> -tag t`: material / MIC sweep (create a MIC, assign it to a mesh, render offscreen; `Profiles/Game/sweeps/materials_200.list`).
 - `dt_run.ps1 -Tag t -Max 300`: loads random DataTable assets from the asset registry (`dt_test.py`), restarts after a crash and excludes the culprit.
-- Validation of shadow recipes: `-Extra "-SuzieForceShadowMarked"` reads the members that a legacy engine still carried through shadows, `-SuzieForceShadowMarked=Type+Type.Member` restricts it.
+- Validation of shadow recipes: `-Extra "-SuzieForceShadowMarked"` reads through shadow properties the members that a modified engine tree carries as real code, `-SuzieForceShadowMarked=Type+Type.Member` restricts it.

@@ -1,5 +1,5 @@
-// Fork addition (generic, game agnostic): generates a game's native reflection types from baked JSON (format 1), driven by an FSzProfile.
-// Ported from the standalone generator this fork replaces; all game specifics live in the profile data.
+// Generic, game agnostic: generates a game's native reflection types from baked JSON (format 1), driven by an FSzProfile.
+// All game specifics live in the profile data.
 #pragma once
 
 #include "CoreMinimal.h"

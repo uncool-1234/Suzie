@@ -1,5 +1,5 @@
 # usage: run_gates.ps1 -Tag <name> [-Project <uproject>] [-OutDir <dir>] [-Extra "<editor args>"] [-OldGolden <file>] [-Skip golden,bp,mat]
-# The parity gates of the modkit architecture (G2/G4) in one go, with the generator selected by -Extra (or by the project/profile):
+# The regression gates in one go (golden dump + verify, Blueprint sweep, material sweep), with the generator selected by -Extra (or by the project/profile):
 #   golden   one editor start: verify, tags, Suzie.DumpAll; log excerpt: override counters, verify totals
 #   bp       Blueprint/AnimBP/Widget load sweep (Profiles/<profile>/sweeps/blueprints_531.list)   expected: CLEAN >= 529, DIRTY <= 2, CRASH 0
 #   mat      material / MIC sweep (materials_200.list)                                            expected: PASS 200

@@ -38,13 +38,13 @@ void FSuziePluginModule::StartupModule()
 {
     UE_LOG(LogSuzie, Display, TEXT("Suzie plugin starting"));
 
-    // Fork behaviour:
+    // Startup behaviour:
     //  -DisableSuzie   : do nothing.
     //  default         : if a profile is selected (-SuzieProfile=<name|dir>, ModkitLocal.ini [Local] SuzieProfile=, else the engine profile
     //                    -ModkitProfile= / [Local] Profile= when that directory holds a profile.json) its baked types are generated at startup.
     //                    A plugin listed in the profile's conflicting_plugins that is enabled (and not disabled by its switch) wins and Suzie idles.
-    //  -SuzieGenerate  : explicit request: errors instead of idling on a conflict; without a profile the upstream behaviour
-    //                    (Content/DynamicClasses/*.jmap) runs.
+    //  -SuzieGenerate  : generates even when a conflicting plugin is enabled (the conflict is reported as an error); without a profile it runs
+    //                    the jmap route (Content/DynamicClasses/*.jmap).
     //  no profile and no -SuzieGenerate: idle, so the plugin can sit in a project without a game.
     if (FParse::Param(FCommandLine::Get(), TEXT("DisableSuzie")))
     {
@@ -221,8 +221,8 @@ void FSuziePluginModule::CreateDynamicClassesForJsonObject(const TSharedPtr<FJso
         FString Type = It.Value()->AsObject()->GetStringField(TEXT("type"));
         if (Type == TEXT("Class"))
         {
-            // Meatloaf bug (commit d8179e8): CDOs of UClass-derived native classes will be labeled with Class type, instead of "Object" type, which will result in a crash
-            // down the line due to the CDO being created with the wrong class type
+            // The jmap labels the CDOs of UClass-derived native classes with the Class type instead of the Object type; creating the CDO with that type
+            // would crash later, so the type is rewritten to Object.
             FString PackageName;
             FString ClassName;
             ParseObjectPath(ObjectPath, PackageName, ClassName);
@@ -433,8 +433,8 @@ public:
     virtual void LinkInternal(FArchive& Ar) override {}
 
 #if (ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 5)
-    // 5.5 Changed logic in UObject::DestroyNonNativeProperties to call FinishDestroy_InContainer instead of DestroyValue_InContainer for Native/Intrinsic classes
-    // So for versions above 5.5 we need to override FinishDestroy and ContainsClearOnFinishDestroy rather than DestroyValueInternal
+    // From 5.5 UObject::DestroyNonNativeProperties calls FinishDestroy_InContainer (not DestroyValue_InContainer) for Native/Intrinsic classes,
+    // so this property overrides ContainsClearOnFinishDestroy and FinishDestroy; DestroyValueInternal stays empty.
     virtual void DestroyValueInternal(void* Dest) const override {}
     virtual bool ContainsClearOnFinishDestroyInternal(TArray<const FStructProperty*>& EncounteredStructProps) const override { return true; }
     virtual void FinishDestroyInternal(void* Data) const override
@@ -502,7 +502,7 @@ UClass* FSuziePluginModule::FindOrCreateClass(FDynamicClassGenerationContext& Co
         const EPropertyFlags ExtraPropertyFlags = CPF_Edit | CPF_BlueprintVisible | CPF_BlueprintAssignable;
         if (FProperty* CreatedProperty = AddPropertyToStruct(Context, NewClass, PropertyDescriptor->AsObject(), ExtraPropertyFlags))
         {
-            // Because this is a native class, we have to link the property offset manually here rather than expecting StaticLink to do it for us
+            // The class is native, so the property offset is linked here; StaticLink does not do it.
             NewClass->PropertiesSize = CreatedProperty->Link(EmptyPropertyLinkArchive);
             NewClass->MinAlignment = FMath::Max(NewClass->MinAlignment, CreatedProperty->GetMinAlignment());
 #if (ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 5)
@@ -696,7 +696,7 @@ UEnum* FSuziePluginModule::FindOrCreateEnum(FDynamicClassGenerationContext& Cont
         if (EnumNameAndValueArray.Num() == 2)
         {
             const FString EnumConstantName = EnumNameAndValueArray[0]->AsString();
-            // TODO: Using numbers to represent enumeration values is not safe, large int64 values cannot be adequately represented as json double precision numbers
+            // Enumerator values are JSON numbers (doubles); int64 values beyond 2^53 are not represented exactly.
             const int64 EnumConstantValue = EnumNameAndValueArray[1]->AsNumber();
 
             EnumNames.Add({FName(*EnumConstantName), EnumConstantValue});
@@ -704,7 +704,7 @@ UEnum* FSuziePluginModule::FindOrCreateEnum(FDynamicClassGenerationContext& Cont
         }
     }
 
-    // TODO: CppForm and Flags are not currently dumped, but we can assume flags None for most enums and guess CppForm based on names and CppType
+    // The dump carries no CppForm or flags: flags are None, and CppForm is derived from the enumerator names and the CppType.
     const bool bCppTypeIsNamespaced = NewEnum->CppType.Contains(TEXT("::"));
     const UEnum::ECppForm EnumCppForm = bContainsFullyQualifiedNames ? (bCppTypeIsNamespaced ? UEnum::ECppForm::Namespaced : UEnum::ECppForm::EnumClass) : UEnum::ECppForm::Regular;
     const EEnumFlags EnumFlags = EEnumFlags::None;
@@ -859,7 +859,7 @@ void FSuziePluginModule::ParseObjectPath(const FString& ObjectPath, FString& Out
     }
     else if (ObjectPath.FindLastChar('.', ObjectNameSeparatorIndex))
     {
-        // This is a top level object (or this is a legacy path), string past the asset name separator is the object name
+        // A top level object (or a path without a subobject separator): the string past the asset name separator is the object name
         OutOuterObjectPath = ObjectPath.Mid(0, ObjectNameSeparatorIndex);
         OutObjectName = ObjectPath.Mid(ObjectNameSeparatorIndex + 1);
     }
@@ -1104,7 +1104,7 @@ FProperty* FSuziePluginModule::BuildProperty(FDynamicClassGenerationContext& Con
     }
     else
     {
-        // TODO: These can be handled together without special casing them by dumping array of FField::GetInnerFields instead of individual fields
+        // Container inner properties are special cased (the dump lists them as individual fields, not as an array of FField::GetInnerFields)
         if (FArrayProperty* ArrayProperty = CastField<FArrayProperty>(NewProperty))
         {
             FProperty* Inner = BuildProperty(Context, NewProperty, PropertyJson->GetObjectField(TEXT("inner")));
@@ -1268,7 +1268,7 @@ void FSuziePluginModule::DeserializePropertyValue(const FProperty* Property, voi
     }
     else if (const FTextProperty* TextProperty = CastField<FTextProperty>(Property))
     {
-        // TODO: Implement once dump format is known
+        // The text value is taken as a culture invariant string.
         TextProperty->SetPropertyValue(PropertyValuePtr, FText::AsCultureInvariant(JsonPropertyValue->AsString()));
     }
     else if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property); EnumProperty && EnumProperty->GetEnum())
@@ -1649,7 +1649,7 @@ void FSuziePluginModule::FinalizeClass(FDynamicClassGenerationContext& Context, 
     }
 
     // Iterate default subobjects of our parent native class. If we have not created one of them, it means it has been explicitly disabled
-    // TODO: This does not handle disabled nested default subobjects.
+    // Disabled nested default subobjects are not detected.
     const UClass* NativeParentClass = GetNativeParentClassForDynamicClass(Class);
     ForEachObjectWithOuter(NativeParentClass->GetDefaultObject(), [&](const UObject* ArchetypeDefaultSubobject)
     {
@@ -1667,7 +1667,7 @@ void FSuziePluginModule::FinalizeClass(FDynamicClassGenerationContext& Context, 
     // Recursively deserialize property values for the default object and its subobjects (and their nested subobjects)
     DeserializeObjectAndSubobjectPropertyValuesRecursive(Context, ClassDefaultObject, ClassDefaultObjectDefinition);
 
-    // Create an archetype by duplicating the CDO. We will use that archetype instead of CDO for priming the instances with correct values
+    // Creates an archetype by duplicating the CDO; the archetype primes new instances with the CDO values in place of the CDO itself.
     // Do not create archetypes for NetConnection-derived classes, they have faulty shutdown logic leading to a crash on exit
     if (!Class->IsChildOf<UNetConnection>())
     {

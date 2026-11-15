@@ -1,4 +1,4 @@
-// Fork addition (generic, game agnostic): console commands for the profile driven generator.
+// Generic, game agnostic: console commands for the profile driven generator.
 //   Suzie.GenerateNativeTypes [types file]   Suzie.VerifyNativeTypes [usmap tsv]   Suzie.DumpClass <class path>
 //   Suzie.DumpAll <out file>                 Suzie.TagInfo [tag...]
 #include "SzBakedGenerator.h"

@@ -1,4 +1,4 @@
-// Fork addition (generic, game agnostic). A profile is a directory of data that parameterises the generator.
+// Generic, game agnostic. A profile is a directory of data that parameterises the generator.
 // MIT, same license as the rest of the plugin.
 #pragma once
 

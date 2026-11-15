@@ -1,4 +1,4 @@
-// Fork addition (generic, game agnostic). MIT, same license as the rest of the plugin.
+// Generic, game agnostic. MIT, same license as the rest of the plugin.
 // Extension point for the small amount of game code a profile cannot express as data: native struct ops (a struct that is serialized
 // by hand) and post-serialize handlers (data a game appends after the reflected part of an export).
 //
