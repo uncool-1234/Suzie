@@ -1027,7 +1027,7 @@ public:
 		}
 	}
 
-	/** For every engine type whose game layout differs (types[] of the profile engine_diff file, with the game's full property list in
+	/** For every engine type whose game layout differs (types[] of the records derived from the jmap, with the game's full property list in
 	 *  game_props) build a recipe: the game's properties in the game's order; a live property is used when name and type match,
 	 *  otherwise a standalone shadow property (discarded on load) stands in. Consumed by SzSchemaOverrideProvider. */
 	void BuildOverrides(const FJObj& D)
