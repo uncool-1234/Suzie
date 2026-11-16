@@ -2,13 +2,13 @@
 
 ## This fork
 
-This fork is used by the Game modkit in profile driven mode. The generic code in `Source/Suzie` generates a game's native enums, structs, classes and delegates in memory from baked JSON (`Profiles/<Game>/data/bake/types.json`, written by the profile's baker from a jmap). Everything game specific lives in a profile directory. The Game profile is `Profiles/Game`; see [Profiles/Game/README.md](Profiles/Game/README.md). Generation runs at editor start when a profile is selected (`ModkitLocal.ini [Local] Profile=`, or `-SuzieProfile=`).
+This fork is used by the Game modkit in profile driven mode. The generic code in `Source/Suzie` generates a game's native enums, structs, classes and delegates in memory at every editor start from the game's jmap (`-SuzieJmap=<file>`, else `[Local] Jmap=` in `<Project>/ModkitLocal.ini`). Everything game specific lives in a profile directory. The Game profile is `Profiles/Game`; see [Profiles/Game/README.md](Profiles/Game/README.md). Generation runs at editor start when a profile is selected (`ModkitLocal.ini [Local] Profile=`, or `-SuzieProfile=`).
 
 The `docs` folder of the modkit workspace describes the whole modkit: `profile-format.md`, `native-type-generation.md`, `schema-shadow-properties.md` and the others.
 
 ## Upstream jmap route
 
-The section below is the upstream Suzie instruction set. It runs only with `-SuzieGenerate`: when no profile is selected, when the profile has no baked types file, or with `-SuzieUpstreamJmap` (which also needs `-SuzieGenerate`). See `FSuziePluginModule::StartupModule` in `Source/Suzie/Private/SuziePlugin.cpp`.
+The section below is the upstream Suzie instruction set. It runs only with `-SuzieGenerate`: when no profile is selected, when the profile has no jmap configured, or with `-SuzieUpstreamJmap` (which also needs `-SuzieGenerate`). See `FSuziePluginModule::StartupModule` in `Source/Suzie/Private/SuziePlugin.cpp`.
 
 Suzie is an Unreal Engine plugin that dynamically generates UHT (Unreal Header Tool) classes at editor runtime from dumped game class definitions. This allows working with game classes in Blueprint without having to generate headers and recompile if changed.
 
@@ -80,10 +80,11 @@ git clone https://github.com/trumank/Suzie
 
 Next to the jmap route above, `Source/Suzie/Private/Gen` contains a generic, profile driven generator. Everything game specific lives in a **profile** directory (`Profiles/<Game>/`); `Source/` contains no game names (`Tools/check-layers.ps1`).
 
-- **Baked types**: the profile's baker turns a jmap into one compact JSON (types, functions, properties with exact flags, struct sizes, interfaces, default subobjects, CDO deltas). Suzie generates enums, structs, classes and delegates from it in about 1.5 s (`Suzie.GenerateNativeTypes`).
-- **Selecting a profile**: `<Project>/ModkitLocal.ini [Local] Profile=<profile folder>` (the folder that holds `profile.json` and `engine.ini`) or `-SuzieProfile=<name|dir>`. With a profile selected, generation runs at startup without a switch, unless a plugin listed in the profile's `conflicting_plugins` is enabled. `-DisableSuzie` turns it off. Without a profile Suzie idles (`-SuzieGenerate` still runs the jmap route).
-- **Shadow recipes**: engine types whose game layout differs are described in `schema/engine_diff.json`; the engine's unversioned schema hook reads the members the engine lacks into a temporary and discards them. This needs the `modkit-core` engine branch (`UObject/UnversionedSchemaOverride.h`); without it the plugin still compiles (the hooks are probed at compile time).
+- **Derivation from the jmap**: Suzie parses the game's jmap (about 8 s for a 180 MB file), compares it with the live editor reflection and derives every enum, struct, class and delegate the editor lacks (properties with exact flags, struct sizes, interfaces, default subobjects). Generation takes about 0.8 s (`Suzie.GenerateNativeTypes`). No intermediate file exists.
+- **Selecting a profile**: `<Project>/ModkitLocal.ini [Local] Profile=<profile folder>` (the folder that holds `profile.json` and `engine.ini`) or `-SuzieProfile=<name|dir>`. With a profile selected and a jmap configured, generation runs at startup without a switch, unless a plugin listed in the profile's `conflicting_plugins` is enabled; without a jmap Suzie logs an error and generates nothing. `-DisableSuzie` turns it off. Without a profile Suzie idles (`-SuzieGenerate` still runs the upstream jmap route).
+- **Shadow recipes**: engine types whose game layout differs get a recipe derived from the same jmap comparison at startup; the engine's unversioned schema hook reads the members the engine lacks into a temporary and discards them. This needs the `modkit-core` engine branch (`UObject/UnversionedSchemaOverride.h`); without it the plugin still compiles (the hooks are probed at compile time).
 - **Game extension** (`SuzieExtension.h`): code that cannot be data (a struct with hand written serialization, handlers for data a game appends after the reflected part of an export) comes from a small plugin module named by the profile (`extension_module`), bound by name in `load/native_ops.json` and `load/skip.json`.
+- **Gameplay tags**: the game's tag list and redirects are written from the jmap to the project's config files at startup.
 - **Verification**: `Suzie.VerifyNativeTypes`, `Suzie.DumpClass`, `Suzie.DumpAll`, `Suzie.TagInfo`, and the sweep harness in `Tools/sweep`.
 
 Documentation lives in the workspace folder `<path>` (`profile-format.md`, `native-type-generation.md`, `schema-shadow-properties.md`).
