@@ -3,11 +3,11 @@
 Compares two Suzie.DumpAll dumps block by block (a block starts at a line without leading blanks: ENUM/STRUCT/CLASS/... <path> ...).
 Prints added / removed / changed blocks (with the first differing lines) and exits 1 when something is not covered by the whitelist.
 Whitelist lines: `<KIND> <path>  # reason` (matches added, removed or changed blocks of that type); `#` comments allowed."""
-import sys, re, argparse, collections
+import sys, re, argparse, collections, gzip
 
 def blocks(path):
     out = collections.OrderedDict(); cur = None; head = {}
-    for l in open(path, encoding='utf8', errors='replace'):
+    for l in (gzip.open(path, 'rt', encoding='utf8', errors='replace') if path.endswith('.gz') else open(path, encoding='utf8', errors='replace')):
         l = l.rstrip('\n')
         if l and not l[0].isspace():
             m = re.match(r'(\S+)\s+(\S+)', l)
