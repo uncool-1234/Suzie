@@ -89,8 +89,6 @@ bool FSzProfile::Load(FSzProfile& Out, bool bQuiet)
 	Out.Dir = Dir;
 	P->TryGetStringField(TEXT("id"), Out.Id);
 	FString S;
-	if (P->TryGetStringField(TEXT("types"), S)) Out.TypesFile = Resolve(Dir, S);
-	if (P->TryGetStringField(TEXT("engine_diff"), S)) Out.EngineDiffFile = Resolve(Dir, S);
 	if (P->TryGetStringField(TEXT("skip"), S)) Out.SkipFile = Resolve(Dir, S);
 	P->TryGetStringField(TEXT("extension_module"), Out.ExtensionModule);
 	if (P->TryGetStringField(TEXT("native_ops"), S))
@@ -110,8 +108,6 @@ bool FSzProfile::Load(FSzProfile& Out, bool bQuiet)
 		}
 	}
 	if (P->TryGetStringField(TEXT("tags"), S)) Out.TagsFile = Resolve(Dir, S);
-	const TSharedPtr<FJsonObject>* Verify;
-	if (P->TryGetObjectField(TEXT("verify"), Verify) && (*Verify)->TryGetStringField(TEXT("usmap_tsv"), S)) Out.UsmapTsv = Resolve(Dir, S);
 	const TArray<TSharedPtr<FJsonValue>>* Arr;
 	if (P->TryGetArrayField(TEXT("conflicting_plugins"), Arr))
 	{

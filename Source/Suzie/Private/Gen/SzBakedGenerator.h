@@ -1,10 +1,12 @@
-// Generic, game agnostic: generates a game's native reflection types from baked JSON (format 1), driven by an FSzProfile.
+// Generic, game agnostic: generates a game's native reflection types from the records derived from its jmap (SzJmapSource), driven by an FSzProfile.
 // All game specifics live in the profile data.
 #pragma once
 
 #include "CoreMinimal.h"
 #include "UObject/WeakObjectPtr.h"
 #include "SzProfile.h"
+
+struct FSzJmapTypes;
 
 struct FSzGenStats
 {
@@ -35,7 +37,7 @@ struct FSzGeneratedType
 class FSzBakedGenerator
 {
 public:
-	static bool Generate(const FSzProfile& Profile, FSzGenStats& OutStats);
+	static bool Generate(const FSzProfile& Profile, const FSzJmapTypes& Source, FSzGenStats& OutStats);
 	static TMap<FString, FSzGeneratedType>& GetGenerated();
 };
 

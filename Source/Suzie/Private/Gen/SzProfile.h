@@ -10,11 +10,8 @@ struct FSzProfile
 	FString Dir;
 
 	// data files (absolute after Load)
-	FString TypesFile;       // baked types (format 1), see Tools/ and the profile README
-	FString EngineDiffFile;  // recipes for engine types whose game layout differs (shadow properties)
 	FString SkipFile;        // classes whose cooked exports are skipped on load
 	FString TagsFile;        // gameplay tag probe description (optional)
-	FString UsmapTsv;        // optional independent schema dump for the verify command
 
 	// policy (overrides.json)
 	TArray<FString> AbstractIfDerivedFrom; // generated classes deriving from one of these are marked Abstract

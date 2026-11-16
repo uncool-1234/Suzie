@@ -26,6 +26,7 @@
 #include "Interfaces/IPluginManager.h"
 #include "Gen/SzProfile.h"
 #include "Gen/SzBakedGenerator.h"
+#include "Gen/SzJmapSource.h"
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 3
 #include "UObject/PropertyOptional.h"
 #endif
@@ -41,7 +42,8 @@ void FSuziePluginModule::StartupModule()
     // Startup behaviour:
     //  -DisableSuzie   : do nothing.
     //  default         : if a profile is selected (-SuzieProfile=<name|dir>, ModkitLocal.ini [Local] SuzieProfile=, else the engine profile
-    //                    -ModkitProfile= / [Local] Profile= when that directory holds a profile.json) its baked types are generated at startup.
+    //                    -ModkitProfile= / [Local] Profile= when that directory holds a profile.json) the game's types are generated at
+    //                    startup from the jmap (-SuzieJmap=<file>, ModkitLocal.ini [Local] Jmap=).
     //                    A plugin listed in the profile's conflicting_plugins that is enabled (and not disabled by its switch) wins and Suzie idles.
     //  -SuzieGenerate  : generates even when a conflicting plugin is enabled (the conflict is reported as an error); without a profile it runs
     //                    the jmap route (Content/DynamicClasses/*.jmap).
@@ -80,15 +82,17 @@ void FSuziePluginModule::StartupModule()
                 return;
             }
         }
-        if (!Profile.TypesFile.IsEmpty() && FPaths::FileExists(Profile.TypesFile) && !FParse::Param(FCommandLine::Get(), TEXT("SuzieUpstreamJmap")))
+        const FString Jmap = SzJmap::ResolveFile();
+        const bool bHaveJmap = !Jmap.IsEmpty() && FPaths::FileExists(Jmap);
+        if (bHaveJmap && !FParse::Param(FCommandLine::Get(), TEXT("SuzieUpstreamJmap")))
         {
-            UE_LOG(LogSuzie, Display, TEXT("Suzie: profile '%s' (%s), generating from baked types %s"), *Profile.Id, *Profile.Dir, *Profile.TypesFile);
+            UE_LOG(LogSuzie, Display, TEXT("Suzie: profile '%s' (%s), generating from jmap %s"), *Profile.Id, *Profile.Dir, *Jmap);
             SuzieCommands::RunGenerateFromModule(Profile);
             return;
         }
         if (!bExplicit)
         {
-            UE_LOG(LogSuzie, Warning, TEXT("Suzie idle: profile '%s' has no baked types file (%s); run the baker (Profiles/%s/tools) or pass -SuzieGenerate for the upstream jmap route"), *Profile.Id, *Profile.TypesFile, *Profile.Id);
+            UE_LOG(LogSuzie, Error, TEXT("Suzie idle: profile '%s' needs the game's jmap, %s. Set Jmap=<file> under [Local] in <Project>/ModkitLocal.ini or pass -SuzieJmap=<file>"), *Profile.Id, Jmap.IsEmpty() ? TEXT("none is configured") : *FString::Printf(TEXT("%s does not exist"), *Jmap));
             return;
         }
     }

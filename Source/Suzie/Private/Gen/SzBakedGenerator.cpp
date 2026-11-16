@@ -1,4 +1,5 @@
 #include "SzBakedGenerator.h"
+#include "SzJmapSource.h"
 #include "SuziePlugin.h"
 
 #include "Dom/JsonValue.h"
@@ -1029,30 +1030,14 @@ public:
 	/** For every engine type whose game layout differs (types[] of the profile engine_diff file, with the game's full property list in
 	 *  game_props) build a recipe: the game's properties in the game's order; a live property is used when name and type match,
 	 *  otherwise a standalone shadow property (discarded on load) stands in. Consumed by SzSchemaOverrideProvider. */
-	void BuildOverrides(const FString& DiffFile)
+	void BuildOverrides(const FJObj& D)
 	{
-		FString Text;
-		FJObj D;
-		if (!FFileHelper::LoadFileToString(Text, *DiffFile))
-		{
-			UE_LOG(LogSuzie, Log, TEXT("No engine diff file %s"), *DiffFile);
-			return;
-		}
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Text);
-		if (!FJsonSerializer::Deserialize(Reader, D) || !D.IsValid())
+		if (!D.IsValid())
 		{
 			return;
 		}
-		int32 Types = 0, Shadows = 0, Skipped = 0, Forced = 0;
+		int32 Types = 0, Shadows = 0, Skipped = 0;
 		UObject* ShadowOwner = GetTransientPackage();
-		// -SuzieForceShadowMarked: recipe entries marked "fk" (members a modified engine tree carries as real code) are read through shadow
-		// properties even when a live property matches. Validation aid: the schema reads as it would with those members absent from the engine
-		// headers, while the compiled members keep their default values.
-		FString ForceList; // -SuzieForceShadowMarked=TypeA+TypeB.Member restricts the forcing to those types (leaf names), for bisecting
-		FParse::Value(FCommandLine::Get(), TEXT("SuzieForceShadowMarked="), ForceList);
-		TArray<FString> ForceTypes;
-		ForceList.ParseIntoArray(ForceTypes, TEXT("+")); // FParse stops values at a comma, so the list is separated by +
-		const bool bForceShadowMarked = FParse::Param(FCommandLine::Get(), TEXT("SuzieForceShadowMarked")) || ForceTypes.Num() > 0;
 		for (const TSharedPtr<FJsonValue>& V : D->GetArrayField(TEXT("types")))
 		{
 			FJObj T = V->AsObject();
@@ -1090,11 +1075,6 @@ public:
 				FRecipeEntry E;
 				E.Dim = FMath::Max(1, (int32)Dim);
 				FProperty** L = Live.Find(Name);
-				if (L && bForceShadowMarked && PJ->HasField(TEXT("fk")) && (ForceTypes.Num() == 0 || ForceTypes.Contains(LeafOfPath(Path)) || ForceTypes.Contains(LeafOfPath(Path) + TEXT(".") + Name)))
-				{
-					L = nullptr;
-					Forced++;
-				}
 				if (L && (*L)->GetClass()->GetName() == Type && (*L)->ArrayDim == E.Dim)
 				{
 					bool bSameStruct = true;
@@ -1157,8 +1137,7 @@ public:
 			GRecipes.Add(S, MoveTemp(Recipe));
 		}
 		Stats.OverrideTypes = Types; Stats.OverrideShadows = Shadows; Stats.OverrideSkipped = Skipped;
-		UE_LOG(LogSuzie, Log, TEXT("Schema overrides: %d types, %d shadow properties, %d skipped%s"), Types, Shadows, Skipped,
-			bForceShadowMarked ? *FString::Printf(TEXT(" (%d marked entries forced to shadows)"), Forced) : TEXT(""));
+		UE_LOG(LogSuzie, Log, TEXT("Schema overrides: %d types, %d shadow properties, %d skipped"), Types, Shadows, Skipped);
 #if SUZIE_HAS_SCHEMA_OVERRIDE
 		UE::UnversionedSchema::SetOverrideProvider(&SzSchemaOverrideProvider);
 		UE::UnversionedSchema::FlushAllUnversionedSchemas();
@@ -1201,29 +1180,12 @@ public:
 		}
 	}
 
-	bool Run(const FString& File)
+	bool Run(const FSzJmapTypes& Source)
 	{
 		const double T0 = FPlatformTime::Seconds();
-		FString Text;
-		if (!FFileHelper::LoadFileToString(Text, *File))
-		{
-			UE_LOG(LogSuzie, Error, TEXT("Cannot read %s"), *File);
-			return false;
-		}
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Text);
-		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
-		{
-			UE_LOG(LogSuzie, Error, TEXT("JSON parse failed: %s"), *File);
-			return false;
-		}
-		Text.Empty();
-		const TSharedPtr<FJsonObject>* Masks;
-		if (Root->TryGetObjectField(TEXT("masks"), Masks))
-		{
-			DerivedMask = HexField(*Masks, TEXT("cpf_derived_candidates"));
-		}
-
-		
+		Root = Source.Types;
+		// flags that property creation derives on its own
+		DerivedMask = CPF_ZeroConstructor | CPF_IsPlainOldData | CPF_NoDestructor | CPF_HasGetValueTypeHash | CPF_UObjectWrapper | CPF_TObjectPtr | CPF_ContainsInstancedReference;
 
 		const TArray<TSharedPtr<FJsonValue>>& Enums = Root->GetArrayField(TEXT("enums"));
 		const TArray<TSharedPtr<FJsonValue>>& Structs = Root->GetArrayField(TEXT("structs"));
@@ -1327,7 +1289,7 @@ public:
 #endif
 		if (GRecipes.Num() == 0)
 		{
-			BuildOverrides(Profile->EngineDiffFile);
+			BuildOverrides(Source.EngineDiff);
 		}
 
 		GFillDone = true;
@@ -1352,11 +1314,11 @@ public:
 };
 } // namespace
 
-bool FSzBakedGenerator::Generate(const FSzProfile& Profile, FSzGenStats& OutStats)
+bool FSzBakedGenerator::Generate(const FSzProfile& Profile, const FSzJmapTypes& Source, FSzGenStats& OutStats)
 {
 	FGen Gen;
 	Gen.Profile = &Profile;
-	const bool bOk = Gen.Run(Profile.TypesFile);
+	const bool bOk = Gen.Run(Source);
 	OutStats = Gen.Stats;
 	return bOk;
 }

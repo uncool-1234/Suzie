@@ -1,7 +1,8 @@
 // Generic, game agnostic: console commands for the profile driven generator.
-//   Suzie.GenerateNativeTypes [types file]   Suzie.VerifyNativeTypes [usmap tsv]   Suzie.DumpClass <class path>
-//   Suzie.DumpAll <out file>                 Suzie.TagInfo [tag...]
+//   Suzie.GenerateNativeTypes   Suzie.VerifyNativeTypes   Suzie.DumpClass <class path>
+//   Suzie.DumpAll <out file>    Suzie.TagInfo [tag...|refresh]
 #include "SzBakedGenerator.h"
+#include "SzJmapSource.h"
 #include "SzProfile.h"
 #include "SuziePlugin.h"
 
@@ -24,76 +25,66 @@
 
 namespace
 {
-FString RunGenerateCommon(const FSzProfile& P, const FString& File)
+FString RunGenerateCommon(const FSzProfile& P)
 {
-	FSzProfile Copy = P;
-	if (!File.IsEmpty()) Copy.TypesFile = File;
+	const FSzJmapTypes* Source = SzJmap::Get();
+	if (!Source)
+	{
+		return FString::Printf(TEXT("GENERATE FAILED: no jmap (%s). Set Jmap= under [Local] in <Project>/ModkitLocal.ini or pass -SuzieJmap=<file>"), *SzJmap::ResolveFile());
+	}
 	FSzGenStats S;
-	const bool bOk = FSzBakedGenerator::Generate(Copy, S);
-	return FString::Printf(TEXT("GENERATE %s file=%s: enums=%d(+%d existing) structs=%d(+%d existing, %d failed) classes=%d(+%d existing, %d failed) delegates=%d functions=%d properties=%d unresolved=%d overrides=%d/%d/%d time=%.2fs"),
-		bOk ? TEXT("OK") : TEXT("FAILED"), *Copy.TypesFile, S.Enums, S.EnumsExisting, S.Structs, S.StructsExisting, S.StructsFailed, S.Classes, S.ClassesExisting, S.ClassesFailed, S.Delegates, S.Functions, S.Properties, S.Unresolved, S.OverrideTypes, S.OverrideShadows, S.OverrideSkipped, S.Seconds);
+	const bool bOk = FSzBakedGenerator::Generate(P, *Source, S);
+	return FString::Printf(TEXT("GENERATE %s jmap=%s: enums=%d(+%d existing) structs=%d(+%d existing, %d failed) classes=%d(+%d existing, %d failed) delegates=%d functions=%d properties=%d unresolved=%d overrides=%d/%d/%d time=%.2fs (jmap parse %.1fs, derive %.1fs)"),
+		bOk ? TEXT("OK") : TEXT("FAILED"), *Source->File, S.Enums, S.EnumsExisting, S.Structs, S.StructsExisting, S.StructsFailed, S.Classes, S.ClassesExisting, S.ClassesFailed, S.Delegates, S.Functions, S.Properties, S.Unresolved, S.OverrideTypes, S.OverrideShadows, S.OverrideSkipped, S.Seconds, Source->ParseSeconds, Source->DeriveSeconds);
 }
 
-struct FUsmapRow { FString Name, Type; int32 Dim = 1; };
+/** Writes the game's tag list and redirects (from the jmap's tag settings CDO) as project config files and reloads the tag tree when they changed. */
+void SyncGameplayTags(const FSzProfile& P, const FSzJmapTypes& Source)
+{
+	if (!Source.bHasTagSettings)
+	{
+		return;
+	}
+	const TCHAR* NL = TEXT("\r\n");
+	// plain repeated keys: a '+' prefix yields no array entries in Config/Tags files
+	FString List = FString(TEXT("[/Script/GameplayTags.GameplayTagsList]")) + NL;
+	for (const FSzJmapTypes::FTag& T : Source.Tags)
+	{
+		List += FString::Printf(TEXT("GameplayTagList=(Tag=\"%s\",DevComment=\"%s\")"), *T.Tag, *T.Comment.Replace(TEXT("\""), TEXT("'"))) + NL;
+	}
+	FString Settings = FString(TEXT("[/Script/GameplayTags.GameplayTagsSettings]")) + NL + TEXT("ImportTagsFromConfig=True") + NL + TEXT("WarnOnInvalidTags=True") + NL;
+	for (const TPair<FString, FString>& R : Source.TagRedirects)
+	{
+		Settings += FString::Printf(TEXT("+GameplayTagRedirects=(OldTagName=\"%s\",NewTagName=\"%s\")"), *R.Key, *R.Value) + NL;
+	}
+	auto WriteIfChanged = [](const FString& File, const FString& Text)
+	{
+		FString Old;
+		if (FFileHelper::LoadFileToString(Old, *File) && Old.Replace(TEXT("\r"), TEXT("")) == Text.Replace(TEXT("\r"), TEXT("")))
+		{
+			return false;
+		}
+		return FFileHelper::SaveStringToFile(Text, *File, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	};
+	const FString ListFile = FPaths::ProjectDir() / (P.TagsIni.IsEmpty() ? FString(TEXT("Config/Tags/GameTags.ini")) : P.TagsIni);
+	const bool bList = WriteIfChanged(ListFile, List);
+	const bool bSettings = WriteIfChanged(FPaths::ProjectConfigDir() / TEXT("DefaultGameplayTags.ini"), Settings);
+	if (bList || bSettings)
+	{
+		UGameplayTagsManager::Get().EditorRefreshGameplayTagTree();
+		UE_LOG(LogSuzie, Display, TEXT("Gameplay tags written from the jmap: %d tags, %d redirects (%s)%s"), Source.Tags.Num(), Source.TagRedirects.Num(), *ListFile,
+			bSettings ? TEXT("; DefaultGameplayTags.ini changed: tag redirects apply from the next editor start") : TEXT(""));
+	}
+}
 
 FString PathOf(const UObject* O) { return O ? O->GetPathName() : FString(TEXT("None")); }
-
-TSharedPtr<FJsonObject> LoadJson(const FString& File)
-{
-	FString Text;
-	TSharedPtr<FJsonObject> Obj;
-	if (FFileHelper::LoadFileToString(Text, *File))
-	{
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Text);
-		FJsonSerializer::Deserialize(Reader, Obj);
-	}
-	return Obj;
-}
 }
 
 namespace SuzieCommands
 {
-void RunVerify(const FSzProfile* Profile, const TArray<FString>& Args)
+void RunVerify()
 {
-	FString Tsv = Args.Num() > 0 ? Args[0] : (Profile ? Profile->UsmapTsv : FString());
-	if (!FParse::Value(FCommandLine::Get(), TEXT("SuzieUsmapTsv="), Tsv) && Args.Num() == 0)
-	{
-		FConfigFile Local; // machine local override: <Project>/ModkitLocal.ini [Local] UsmapTsv=
-		Local.Read(FPaths::ProjectDir() / TEXT("ModkitLocal.ini"));
-		FString FromLocal;
-		if (Local.GetString(TEXT("Local"), TEXT("UsmapTsv"), FromLocal) && !FromLocal.IsEmpty())
-		{
-			Tsv = FromLocal;
-		}
-	}
-	TMap<FString, TArray<FUsmapRow>> Usmap;
-	TArray<FString> Lines;
-	const bool bHaveTsv = FFileHelper::LoadFileToStringArray(Lines, *Tsv);
-	if (bHaveTsv)
-	{
-		for (const FString& L : Lines)
-		{
-			TArray<FString> C;
-			L.ParseIntoArray(C, TEXT("\t"), false);
-			if (C.Num() >= 6 && C[0] == TEXT("P"))
-			{
-				FUsmapRow R;
-				R.Name = C[3];
-				R.Type = C[4];
-				R.Dim = FCString::Atoi(*C[5]);
-				TArray<FUsmapRow>& Rows = Usmap.FindOrAdd(C[1]);
-				// the usmap lists a static array once per element: keep one row
-				if (R.Dim > 1 && Rows.Num() > 0 && Rows.Last().Name == R.Name && Rows.Last().Dim == R.Dim && Rows.Last().Type == R.Type)
-				{
-					int32 Run = 1;
-					for (int32 k = Rows.Num() - 2; k >= 0 && Rows[k].Name == R.Name; --k) ++Run;
-					if (Run < R.Dim) continue;
-				}
-				Rows.Add(R);
-			}
-		}
-	}
-	int32 Ok = 0, Bad = 0, Total = 0, NoUsmap = 0;
+	int32 Ok = 0, Bad = 0, Total = 0;
 	for (const TPair<FString, FSzGeneratedType>& KV : FSzBakedGenerator::GetGenerated())
 	{
 		UStruct* S = KV.Value.Struct.Get();
@@ -108,22 +99,22 @@ void RunVerify(const FSzProfile* Profile, const TArray<FString>& Args)
 		}
 		if (Live.Num() != KV.Value.PropNames.Num())
 		{
-			Errors.Add(FString::Printf(TEXT("count live=%d baked=%d"), Live.Num(), KV.Value.PropNames.Num()));
+			Errors.Add(FString::Printf(TEXT("count live=%d game=%d"), Live.Num(), KV.Value.PropNames.Num()));
 		}
 		for (int32 i = 0; i < FMath::Min(Live.Num(), KV.Value.PropNames.Num()); ++i)
 		{
 			const FProperty* P = Live[i];
 			if (P->GetName() != KV.Value.PropNames[i])
-				Errors.Add(FString::Printf(TEXT("#%d name live=%s baked=%s"), i, *P->GetName(), *KV.Value.PropNames[i]));
+				Errors.Add(FString::Printf(TEXT("#%d name live=%s game=%s"), i, *P->GetName(), *KV.Value.PropNames[i]));
 			else if (P->GetClass()->GetName() != KV.Value.PropTypes[i])
-				Errors.Add(FString::Printf(TEXT("#%d %s type live=%s baked=%s"), i, *P->GetName(), *P->GetClass()->GetName(), *KV.Value.PropTypes[i]));
+				Errors.Add(FString::Printf(TEXT("#%d %s type live=%s game=%s"), i, *P->GetName(), *P->GetClass()->GetName(), *KV.Value.PropTypes[i]));
 			else if (P->ArrayDim != KV.Value.PropDims[i])
-				Errors.Add(FString::Printf(TEXT("#%d %s dim live=%d baked=%d"), i, *P->GetName(), P->ArrayDim, KV.Value.PropDims[i]));
+				Errors.Add(FString::Printf(TEXT("#%d %s dim live=%d game=%d"), i, *P->GetName(), P->ArrayDim, KV.Value.PropDims[i]));
 		}
 		if (KV.Value.bIsStruct && KV.Value.BakedSize >= 0 && (S->GetPropertiesSize() != KV.Value.BakedSize || (KV.Value.BakedAlign > 0 && S->GetMinAlignment() != KV.Value.BakedAlign)))
 		{
 			// layout of a generated struct must equal the game's (zero-serialization depends on size/alignment/atomic)
-			Errors.Add(FString::Printf(TEXT("layout size live=%d baked=%d align live=%d baked=%d flags=0x%x"), S->GetPropertiesSize(), KV.Value.BakedSize, S->GetMinAlignment(), KV.Value.BakedAlign, (uint32)Cast<UScriptStruct>(S)->StructFlags));
+			Errors.Add(FString::Printf(TEXT("layout size live=%d game=%d align live=%d game=%d flags=0x%x"), S->GetPropertiesSize(), KV.Value.BakedSize, S->GetMinAlignment(), KV.Value.BakedAlign, (uint32)Cast<UScriptStruct>(S)->StructFlags));
 		}
 		// property sizes (and for structs offsets) vs the game's
 		{
@@ -145,37 +136,6 @@ void RunVerify(const FSzProfile* Profile, const TArray<FString>& Args)
 			if (SizeDiffs) Errors.Add(FString::Printf(TEXT("%d property size diffs, first: %s"), SizeDiffs, *FirstSize));
 			if (OffDiffs) Errors.Add(FString::Printf(TEXT("%d property offset diffs, first: %s"), OffDiffs, *FirstOff));
 		}
-		// usmap (independent source)
-		if (bHaveTsv)
-		{
-			if (const TArray<FUsmapRow>* U = Usmap.Find(S->GetName()))
-			{
-				if (U->Num() != Live.Num())
-				{
-					Errors.Add(FString::Printf(TEXT("usmap count=%d live=%d"), U->Num(), Live.Num()));
-				}
-				for (int32 i = 0; i < FMath::Min(U->Num(), Live.Num()); ++i)
-				{
-					FString LiveType = Live[i]->GetClass()->GetName();
-					if (LiveType == TEXT("MulticastInlineDelegateProperty")) LiveType = TEXT("MulticastDelegateProperty"); // usmap does not distinguish inline/sparse
-					FString UsType = (*U)[i].Type;
-					if (UsType == TEXT("EnumProperty") && LiveType == TEXT("ByteProperty")) LiveType = UsType; // byte with enum
-					if (UsType == TEXT("MulticastInlineDelegateProperty") || UsType == TEXT("MulticastSparseDelegateProperty")) UsType = TEXT("MulticastDelegateProperty");
-					if (LiveType == TEXT("MulticastSparseDelegateProperty")) LiveType = TEXT("MulticastDelegateProperty");
-					if (LiveType == TEXT("ClassProperty")) LiveType = TEXT("ObjectProperty"); // usmap stores class/soft class as object/soft object
-					if (LiveType == TEXT("SoftClassProperty")) LiveType = TEXT("SoftObjectProperty");
-					if ((*U)[i].Name != Live[i]->GetName() || UsType != LiveType || (*U)[i].Dim != Live[i]->ArrayDim)
-					{
-						Errors.Add(FString::Printf(TEXT("usmap #%d %s/%s/%d vs live %s/%s/%d"), i, *(*U)[i].Name, *(*U)[i].Type, (*U)[i].Dim, *Live[i]->GetName(), *Live[i]->GetClass()->GetName(), Live[i]->ArrayDim));
-						break;
-					}
-				}
-			}
-			else
-			{
-				NoUsmap++;
-			}
-		}
 		if (Errors.Num() == 0)
 		{
 			Ok++;
@@ -189,7 +149,7 @@ void RunVerify(const FSzProfile* Profile, const TArray<FString>& Args)
 			}
 		}
 	}
-	UE_LOG(LogSuzie, Log, TEXT("VERIFY RESULT: types=%d ok=%d mismatch=%d (not in usmap tsv: %d, tsv %s)"), Total, Ok, Bad, NoUsmap, bHaveTsv ? TEXT("loaded") : TEXT("missing"));
+	UE_LOG(LogSuzie, Log, TEXT("VERIFY RESULT: types=%d ok=%d mismatch=%d"), Total, Ok, Bad);
 }
 
 void RunDumpClass(const TArray<FString>& Args)
@@ -208,8 +168,8 @@ void RunDumpClass(const TArray<FString>& Args)
 }
 
 // ---------------------------------------------------------------- golden dump
-// Canonical text dump of every type named by the profile's types file, read back from LIVE reflection (so it can be taken
-// whichever generator created the types). Pointers and hashes are excluded; the output is sorted.
+// Canonical text dump of every type derived from the jmap, read back from LIVE reflection. Pointers and hashes are excluded;
+// the output is sorted.
 
 void DescribeProp(const FProperty* P, FString& Out)
 {
@@ -319,12 +279,13 @@ void RunDumpAll(const FSzProfile* Profile, const TArray<FString>& Args)
 		UE_LOG(LogSuzie, Warning, TEXT("DumpAll <out file> (needs -SuzieProfile=)"));
 		return;
 	}
-	const TSharedPtr<FJsonObject> Root = LoadJson(Profile->TypesFile);
-	if (!Root.IsValid())
+	const FSzJmapTypes* Source = SzJmap::Get();
+	if (!Source)
 	{
-		UE_LOG(LogSuzie, Error, TEXT("DumpAll: cannot read %s"), *Profile->TypesFile);
+		UE_LOG(LogSuzie, Error, TEXT("DumpAll: no jmap"));
 		return;
 	}
+	const TSharedPtr<FJsonObject> Root = Source->Types;
 	TMap<FString, FString> Blocks;
 	const TArray<TSharedPtr<FJsonValue>>* Arr;
 	int32 Missing = 0;
@@ -454,20 +415,35 @@ const FSzProfile* GetProfile()
 	return bOk ? &P : nullptr;
 }
 
-FAutoConsoleCommand GGenerateCmd(TEXT("Suzie.GenerateNativeTypes"), TEXT("Suzie.GenerateNativeTypes [baked types file]"),
+FAutoConsoleCommand GGenerateCmd(TEXT("Suzie.GenerateNativeTypes"), TEXT("Suzie.GenerateNativeTypes"),
 	FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
 	{
-		if (const FSzProfile* P = GetProfile()) { UE_LOG(LogSuzie, Log, TEXT("%s"), *RunGenerateCommon(*P, Args.Num() ? Args[0] : FString())); }
+		if (const FSzProfile* P = GetProfile()) { UE_LOG(LogSuzie, Log, TEXT("%s"), *RunGenerateCommon(*P)); }
 		else { UE_LOG(LogSuzie, Error, TEXT("No profile (-SuzieProfile=)")); }
 	}));
-FAutoConsoleCommand GVerifyCmd(TEXT("Suzie.VerifyNativeTypes"), TEXT("Suzie.VerifyNativeTypes [usmap schema tsv]: compare generated property lists with baked data and an independent schema dump"),
-	FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args) { RunVerify(GetProfile(), Args); }));
+FAutoConsoleCommand GVerifyCmd(TEXT("Suzie.VerifyNativeTypes"), TEXT("Suzie.VerifyNativeTypes: compare the generated types' property lists, sizes and offsets with the jmap"),
+	FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args) { RunVerify(); }));
 FAutoConsoleCommand GDumpClassCmd(TEXT("Suzie.DumpClass"), TEXT("Suzie.DumpClass <class path>"), FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args) { RunDumpClass(Args); }));
 FAutoConsoleCommand GDumpAllCmd(TEXT("Suzie.DumpAll"), TEXT("Suzie.DumpAll <out file>: canonical reflection dump of all profile types"), FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args) { RunDumpAll(GetProfile(), Args); }));
 FAutoConsoleCommand GTagInfoCmd(TEXT("Suzie.TagInfo"), TEXT("Suzie.TagInfo [tag...|refresh]"), FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args) { RunTagInfo(GetProfile(), Args); }));
 
 void RunGenerateFromModule(const FSzProfile& P)
 {
-	UE_LOG(LogSuzie, Log, TEXT("%s"), *RunGenerateCommon(P, FString()));
+	UE_LOG(LogSuzie, Log, TEXT("%s"), *RunGenerateCommon(P));
+	if (const FSzJmapTypes* Source = SzJmap::Get())
+	{
+		SyncGameplayTags(P, *Source);
+		// A natively serialized struct writes data that its property list does not describe; without struct ops from the game
+		// extension it is read as a plain property struct.
+		TArray<FString> Plain;
+		for (const FString& S : Source->NativeSerializedStructs)
+		{
+			if (!P.NativeStructOps.Contains(S)) Plain.Add(S);
+		}
+		if (Plain.Num())
+		{
+			UE_LOG(LogSuzie, Display, TEXT("%d generated structs are serialized natively by the game and have no struct ops (load/native_ops.json): %s"), Plain.Num(), *FString::Join(Plain, TEXT(", ")));
+		}
+	}
 }
 }
