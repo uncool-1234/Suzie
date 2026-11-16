@@ -1,5 +1,15 @@
 # Suzie
 
+## This fork
+
+This fork is used by the Game modkit in profile driven mode. The generic code in `Source/Suzie` generates a game's native enums, structs, classes and delegates in memory from baked JSON (`Profiles/<Game>/data/bake/types.json`, written by the profile's baker from a jmap). Everything game specific lives in a profile directory. The Game profile is `Profiles/Game`; see [Profiles/Game/README.md](Profiles/Game/README.md). Generation runs at editor start when a profile is selected (`ModkitLocal.ini [Local] Profile=`, or `-SuzieProfile=`).
+
+The `docs` folder of the modkit workspace describes the whole modkit: `profile-format.md`, `native-type-generation.md`, `schema-shadow-properties.md` and the others.
+
+## Upstream jmap route
+
+The section below is the upstream Suzie instruction set. It runs only with `-SuzieGenerate`: when no profile is selected, when the profile has no baked types file, or with `-SuzieUpstreamJmap` (which also needs `-SuzieGenerate`). See `FSuziePluginModule::StartupModule` in `Source/Suzie/Private/SuziePlugin.cpp`.
+
 Suzie is an Unreal Engine plugin that dynamically generates UHT (Unreal Header Tool) classes at editor runtime from dumped game class definitions. This allows working with game classes in Blueprint without having to generate headers and recompile if changed.
 
 ## How It Works
