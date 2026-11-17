@@ -31,6 +31,11 @@ public class Suzie : ModuleRules
 				"BlueprintGraph",
 				"zlib",
 				"AssetRegistry",
+				"Slate",
+				"SlateCore",
+				"ToolMenus",
+				"MainFrame",
+				"InputCore",
 			}
 			);
 
