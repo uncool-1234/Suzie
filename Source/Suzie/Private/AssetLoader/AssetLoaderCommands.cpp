@@ -5,6 +5,7 @@
 #include "SuziePlugin.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
+#include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
 #include "IO/PackageId.h"
 #include "Misc/PackageName.h"
@@ -47,7 +48,8 @@ namespace
 			FString Source = TEXT("absent");
 			if (bExists)
 			{
-				if (File.IsEmpty())
+				// DoesPackageExist can return the loose path a package would have even when no such file exists (IoStore packages).
+				if (File.IsEmpty() || !IFileManager::Get().FileExists(*File))
 				{
 					Source = TEXT("IoStore");
 				}
