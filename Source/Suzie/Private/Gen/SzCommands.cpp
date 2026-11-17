@@ -30,7 +30,7 @@ FString RunGenerateCommon(const FSzProfile& P)
 	const FSzJmapTypes* Source = SzJmap::Get();
 	if (!Source)
 	{
-		return FString::Printf(TEXT("GENERATE FAILED: no jmap (%s). Set Jmap= under [Local] in <Project>/ModkitLocal.ini or pass -SuzieJmap=<file>"), *SzJmap::ResolveFile());
+		return FString::Printf(TEXT("GENERATE FAILED: no jmap (%s). Set Jmap= under [Local] in <Project>/ModkitData/ModkitLocal.ini or pass -SuzieJmap=<file>"), *SzJmap::ResolveFile());
 	}
 	FSzGenStats S;
 	const bool bOk = FSzBakedGenerator::Generate(P, *Source, S);

@@ -24,7 +24,7 @@ struct FSzJmapTypes
 
 namespace SzJmap
 {
-	/** -SuzieJmap=<file>, else <Project>/ModkitLocal.ini [Local] Jmap=. Empty when neither is set. */
+	/** -SuzieJmap=<file>, else <Project>/ModkitData/ModkitLocal.ini [Local] Jmap=. Empty when neither is set. */
 	FString ResolveFile();
 
 	/** Parses the jmap once per session and compares it with the reflection of the running editor. Null when no jmap is configured or it cannot be read. */

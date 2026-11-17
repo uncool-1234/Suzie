@@ -33,6 +33,9 @@ struct FSzProfile
 	struct FConflict { FString Plugin; FString DisableSwitch; };
 	TArray<FConflict> ConflictingPlugins;
 
-	/** Resolves the profile from -SuzieProfile=<name|dir> or <Project>/ModkitLocal.ini [Local] SuzieProfile=. A bare name is looked up in <plugin>/Profiles. */
+	/** <Project>/ModkitData/ModkitLocal.ini: the machine local paths ([Local] Profile, SuzieProfile, Jmap). */
+	static FString LocalIniFile();
+
+	/** Resolves the profile from -SuzieProfile=<name|dir> or [Local] SuzieProfile= of LocalIniFile(). A bare name is looked up in <plugin>/Profiles. */
 	static bool Load(FSzProfile& Out, bool bQuiet = false);
 };

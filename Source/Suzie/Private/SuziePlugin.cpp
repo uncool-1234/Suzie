@@ -41,9 +41,9 @@ void FSuziePluginModule::StartupModule()
 
     // Startup behaviour:
     //  -DisableSuzie   : do nothing.
-    //  default         : if a profile is selected (-SuzieProfile=<name|dir>, ModkitLocal.ini [Local] SuzieProfile=, else the engine profile
+    //  default         : if a profile is selected (-SuzieProfile=<name|dir>, ModkitData/ModkitLocal.ini [Local] SuzieProfile=, else the engine profile
     //                    -ModkitProfile= / [Local] Profile= when that directory holds a profile.json) the game's types are generated at
-    //                    startup from the jmap (-SuzieJmap=<file>, ModkitLocal.ini [Local] Jmap=).
+    //                    startup from the jmap (-SuzieJmap=<file>, ModkitData/ModkitLocal.ini [Local] Jmap=).
     //                    A plugin listed in the profile's conflicting_plugins that is enabled (and not disabled by its switch) wins and Suzie idles.
     //  -SuzieGenerate  : generates even when a conflicting plugin is enabled (the conflict is reported as an error); without a profile it runs
     //                    the jmap route (Content/DynamicClasses/*.jmap).
@@ -60,7 +60,7 @@ void FSuziePluginModule::StartupModule()
     {
         if (!bExplicit)
         {
-            UE_LOG(LogSuzie, Display, TEXT("Suzie idle: no profile selected (-SuzieProfile=, or Profile= in ModkitLocal.ini) and no -SuzieGenerate"));
+            UE_LOG(LogSuzie, Display, TEXT("Suzie idle: no profile selected (-SuzieProfile=, or Profile= in <Project>/ModkitData/ModkitLocal.ini) and no -SuzieGenerate"));
             return;
         }
     }
@@ -92,7 +92,7 @@ void FSuziePluginModule::StartupModule()
         }
         if (!bExplicit)
         {
-            UE_LOG(LogSuzie, Error, TEXT("Suzie idle: profile '%s' needs the game's jmap, %s. Set Jmap=<file> under [Local] in <Project>/ModkitLocal.ini or pass -SuzieJmap=<file>"), *Profile.Id, Jmap.IsEmpty() ? TEXT("none is configured") : *FString::Printf(TEXT("%s does not exist"), *Jmap));
+            UE_LOG(LogSuzie, Error, TEXT("Suzie idle: profile '%s' needs the game's jmap, %s. Set Jmap=<file> under [Local] in <Project>/ModkitData/ModkitLocal.ini or pass -SuzieJmap=<file>"), *Profile.Id, Jmap.IsEmpty() ? TEXT("none is configured") : *FString::Printf(TEXT("%s does not exist"), *Jmap));
             return;
         }
     }

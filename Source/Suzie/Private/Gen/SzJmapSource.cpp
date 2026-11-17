@@ -11,6 +11,7 @@
 //            u underlying type of an EnumProperty, ic, sg signature function, b {fs, bo, bm, fm, nat}, in / key / val inner properties
 #include "SzJmapSource.h"
 #include "SuziePlugin.h"
+#include "SzProfile.h"
 
 #include "Dom/JsonValue.h"
 #include "Misc/CommandLine.h"
@@ -659,7 +660,7 @@ FString SzJmap::ResolveFile()
 	if (!FParse::Value(FCommandLine::Get(), TEXT("SuzieJmap="), File))
 	{
 		FConfigFile Local;
-		Local.Read(FPaths::ProjectDir() / TEXT("ModkitLocal.ini"));
+		Local.Read(FSzProfile::LocalIniFile());
 		Local.GetString(TEXT("Local"), TEXT("Jmap"), File);
 	}
 	File = File.TrimQuotes().TrimStartAndEnd();

@@ -39,24 +39,29 @@ FString Resolve(const FString& Dir, const FString& Rel)
 }
 }
 
+FString FSzProfile::LocalIniFile()
+{
+	return FPaths::ProjectDir() / TEXT("ModkitData/ModkitLocal.ini");
+}
+
 bool FSzProfile::Load(FSzProfile& Out, bool bQuiet)
 {
 	FString Spec;
 	if (!FParse::Value(FCommandLine::Get(), TEXT("SuzieProfile="), Spec))
 	{
 		FConfigFile Local;
-		Local.Read(FPaths::ProjectDir() / TEXT("ModkitLocal.ini"));
+		Local.Read(LocalIniFile());
 		Local.GetString(TEXT("Local"), TEXT("SuzieProfile"), Spec);
 	}
 	Spec = Spec.TrimQuotes().TrimStartAndEnd();
 	if (Spec.IsEmpty())
 	{
-		// No explicit Suzie profile: use the engine profile directory (-ModkitProfile= / ModkitLocal.ini [Local] Profile=) when it is a Suzie profile too.
+		// No explicit Suzie profile: use the engine profile directory (-ModkitProfile= / [Local] Profile= of LocalIniFile()) when it is a Suzie profile too.
 		FString EngineProfile;
 		if (!FParse::Value(FCommandLine::Get(), TEXT("ModkitProfile="), EngineProfile))
 		{
 			FConfigFile Local;
-			Local.Read(FPaths::ProjectDir() / TEXT("ModkitLocal.ini"));
+			Local.Read(LocalIniFile());
 			Local.GetString(TEXT("Local"), TEXT("Profile"), EngineProfile);
 		}
 		EngineProfile = EngineProfile.TrimQuotes().TrimStartAndEnd();
