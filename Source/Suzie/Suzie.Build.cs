@@ -30,6 +30,7 @@ public class Suzie : ModuleRules
 				"Projects",
 				"BlueprintGraph",
 				"zlib",
+				"AssetRegistry",
 			}
 			);
 
