@@ -29,6 +29,11 @@
 #include "Gen/SzBakedGenerator.h"
 #include "Gen/SzJmapSource.h"
 #include "AssetLoader/AssetLoader.h"
+#include "ContentBrowserDataSubsystem.h"
+#include "Misc/ModkitCore.h"
+#include "Misc/PackageName.h"
+#include "Misc/Paths.h"
+#include "Misc/PathViews.h"
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 3
 #include "UObject/PropertyOptional.h"
 #endif
@@ -37,11 +42,139 @@ DEFINE_LOG_CATEGORY(LogSuzie);
 
 #define LOCTEXT_NAMESPACE "FSuziePluginModule"
 
+namespace
+{
+    // The Content Browser shows the game's plugin content roots (/<Plugin>/ with the local folder below the project's
+    // Plugins folder, and no project plugin of that name) under All/Plugins, like the project's own plugins.
+    bool IsGamePluginMountPoint(const FStringView MountPointName)
+    {
+        if (MountPointName.IsEmpty() || IPluginManager::Get().FindPlugin(MountPointName).IsValid())
+        {
+            return false;
+        }
+        const FString Root = FString(TEXT("/")) + FString(MountPointName) + TEXT("/");
+        if (!FPackageName::MountPointExists(Root))
+        {
+            return false;
+        }
+        FString LocalPath;
+        if (!FPackageName::TryConvertGameRelativePackagePathToLocalPath(Root, LocalPath))
+        {
+            return false;
+        }
+        LocalPath = FPaths::ConvertRelativePathToFull(LocalPath);
+        FPaths::NormalizeDirectoryName(LocalPath);
+        FString ProjectPluginsDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectPluginsDir());
+        FPaths::NormalizeDirectoryName(ProjectPluginsDir);
+        return FPaths::IsUnderDirectory(LocalPath, ProjectPluginsDir);
+    }
+
+    // Replaces the stock prefix logic of UContentBrowserDataSubsystem::ConvertInternalPathToVirtual for every path,
+    // so everything except game plugin roots gets the same prefix the stock logic gives.
+    void GenerateVirtualPathPrefix(const FStringView InPath, FStringBuilderBase& OutPath)
+    {
+        const FStringView MountPointName = FPathViews::GetMountPointNameFromPath(InPath);
+        if (IsGamePluginMountPoint(MountPointName))
+        {
+            OutPath.Append(TEXT("/Plugins"));
+            return;
+        }
+        if (const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(MountPointName))
+        {
+            if (Plugin->GetLoadedFrom() == EPluginLoadedFrom::Engine)
+            {
+                OutPath.Append(TEXT("/EngineData/Plugins"));
+            }
+            else
+            {
+                OutPath.Append(TEXT("/Plugins"));
+            }
+
+            const FPluginDescriptor& PluginDescriptor = Plugin->GetDescriptor();
+            if (!PluginDescriptor.EditorCustomVirtualPath.IsEmpty())
+            {
+                int32 NumChars = PluginDescriptor.EditorCustomVirtualPath.Len();
+                if (PluginDescriptor.EditorCustomVirtualPath.EndsWith(TEXT("/")))
+                {
+                    --NumChars;
+                }
+
+                if (NumChars > 0)
+                {
+                    if (!PluginDescriptor.EditorCustomVirtualPath.StartsWith(TEXT("/")))
+                    {
+                        OutPath.Append(TEXT("/"));
+                    }
+
+                    OutPath.Append(*PluginDescriptor.EditorCustomVirtualPath, NumChars);
+                }
+            }
+        }
+        else if (MountPointName.Equals(TEXT("Engine")))
+        {
+            OutPath.Append(TEXT("/EngineData"));
+        }
+    }
+
+    bool bGamePluginVirtualPathsBound = false;
+    FDelegateHandle GamePluginVirtualPathsPostEngineInitHandle;
+
+    bool TryBindGamePluginVirtualPaths()
+    {
+        UContentBrowserDataSubsystem* Subsystem = GEditor ? GEditor->GetEditorSubsystem<UContentBrowserDataSubsystem>() : nullptr;
+        if (!Subsystem)
+        {
+            return false;
+        }
+        Subsystem->SetGenerateVirtualPathPrefixDelegate(FContentBrowserGenerateVirtualPathDelegate::CreateStatic(&GenerateVirtualPathPrefix));
+        bGamePluginVirtualPathsBound = true;
+        UE_LOG(LogSuzie, Display, TEXT("Suzie: game plugin content roots are shown under Plugins in the Content Browser"));
+        return true;
+    }
+
+    void BindGamePluginVirtualPaths()
+    {
+        if (!Modkit::IsActive() || bGamePluginVirtualPathsBound)
+        {
+            return;
+        }
+        if (!TryBindGamePluginVirtualPaths())
+        {
+            GamePluginVirtualPathsPostEngineInitHandle = FCoreDelegates::OnPostEngineInit.AddLambda([]()
+            {
+                if (TryBindGamePluginVirtualPaths())
+                {
+                    FCoreDelegates::OnPostEngineInit.Remove(GamePluginVirtualPathsPostEngineInitHandle);
+                    GamePluginVirtualPathsPostEngineInitHandle.Reset();
+                }
+            });
+        }
+    }
+
+    void UnbindGamePluginVirtualPaths()
+    {
+        if (GamePluginVirtualPathsPostEngineInitHandle.IsValid())
+        {
+            FCoreDelegates::OnPostEngineInit.Remove(GamePluginVirtualPathsPostEngineInitHandle);
+            GamePluginVirtualPathsPostEngineInitHandle.Reset();
+        }
+        if (bGamePluginVirtualPathsBound)
+        {
+            bGamePluginVirtualPathsBound = false;
+            if (UContentBrowserDataSubsystem* Subsystem = GEditor ? GEditor->GetEditorSubsystem<UContentBrowserDataSubsystem>() : nullptr)
+            {
+                Subsystem->SetGenerateVirtualPathPrefixDelegate(FContentBrowserGenerateVirtualPathDelegate());
+            }
+        }
+    }
+}
+
 void FSuziePluginModule::StartupModule()
 {
 #if defined(UE_MODKIT_PACKAGE_FILTER)
     SzAssetLoader::Startup();
 #endif
+    BindGamePluginVirtualPaths();
     UE_LOG(LogSuzie, Display, TEXT("Suzie plugin starting"));
 
     // Startup behaviour:
@@ -107,6 +240,7 @@ void FSuziePluginModule::StartupModule()
 
 void FSuziePluginModule::ShutdownModule()
 {
+    UnbindGamePluginVirtualPaths();
 #if defined(UE_MODKIT_PACKAGE_FILTER)
     SzAssetLoader::Shutdown();
 #endif

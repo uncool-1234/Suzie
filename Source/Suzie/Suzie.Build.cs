@@ -28,6 +28,7 @@ public class Suzie : ModuleRules
 				"GameplayTags",
 				"UnrealEd",
 				"Projects",
+				"ContentBrowserData",
 				"BlueprintGraph",
 				"zlib",
 				"AssetRegistry",
