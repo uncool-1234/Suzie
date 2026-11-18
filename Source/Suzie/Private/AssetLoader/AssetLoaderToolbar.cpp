@@ -28,12 +28,13 @@ namespace
 			LOCTEXT("ButtonTooltip", "Choose which game assets the editor loads. Current: {0} ({1} packages listed)."),
 			SzAssetLoader::DescribeFilterMode(GSessionFilter),
 			FText::AsNumber(GSessionPackageCount));
-		Section.AddEntry(FToolMenuEntry::InitToolBarButton(
+		FToolMenuEntry& Entry = Section.AddEntry(FToolMenuEntry::InitToolBarButton(
 			FName(TEXT("AssetLoader.Open")),
 			FUIAction(FExecuteAction::CreateStatic(&SzAssetLoader::OpenWindow)),
 			LOCTEXT("ButtonLabel", "Asset Loader"),
 			ToolTip,
 			FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Package")));
+		Entry.StyleNameOverride = "CalloutToolbar";
 	}
 }
 
