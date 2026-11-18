@@ -768,11 +768,19 @@ public:
 		return Fn;
 	}
 
-	void FillFunction(UFunction* Fn, const FJObj& F, const FString& Ctx)
+	/** Fills a function from its record. Without NativeImpl the function is a script stub; with it, the thunk is the function's body. */
+	bool FillFunction(UFunction* Fn, const FJObj& F, const FString& Ctx, FNativeFuncPtr NativeImpl = nullptr)
 	{
 		const FString Kind = StrField(F, TEXT("k"));
 		uint32 Flags = (uint32)(uint64)F->GetNumberField(TEXT("f"));
-		Flags &= ~(uint32)FUNC_Native; // stub: script body below, executed by the VM
+		if (NativeImpl)
+		{
+			Flags |= FUNC_Native;
+		}
+		else
+		{
+			Flags &= ~(uint32)FUNC_Native; // stub: script body below, executed by the VM
+		}
 		Fn->FunctionFlags = (EFunctionFlags)Flags;
 		FString Sup;
 		if (F->TryGetStringField(TEXT("sup"), Sup) && !Sup.IsEmpty())
@@ -782,19 +790,159 @@ public:
 				Fn->SetSuperStruct(SupFn);
 			}
 		}
-		if (!BuildProps(Fn, F, Ctx, nullptr))
+		const bool bOk = BuildProps(Fn, F, Ctx, nullptr);
+		if (!bOk)
 		{
 			UE_LOG(LogSuzie, Error, TEXT("Function %s failed"), *Ctx);
 		}
-		if (Kind == TEXT("F"))
+		if (Kind == TEXT("F") && !NativeImpl)
 		{
 			Fn->Script.Add(EX_Return);
 			Fn->Script.Add(EX_Nothing);
 			Fn->Script.Add(EX_EndOfScript);
 		}
-		Fn->Bind();
+		// Bind() would look the native function up in the owner's table: a registered thunk is set directly
+		if (NativeImpl)
+		{
+			Fn->SetNativeFunc(NativeImpl);
+		}
+		else
+		{
+			Fn->Bind();
+		}
 		Fn->StaticLink(true);
 		Stats.Functions++;
+		return bOk;
+	}
+
+	// ------------------------------------------------------------------ functions of engine classes
+
+	int32 EngineFuncNative = 0, EngineFuncStub = 0, EngineFuncReplaced = 0, EngineFuncSkipped = 0, EngineFuncDiffers = 0;
+
+	/** Same parameter count, names (case-insensitive) and property classes, in declaration order. */
+	static bool SignatureMatches(const UFunction* Fn, const TArray<TSharedPtr<FJsonValue>>& JParams)
+	{
+		TArray<const FProperty*> Params;
+		for (TFieldIterator<FProperty> It(Fn); It && (It->PropertyFlags & CPF_Parm); ++It)
+		{
+			Params.Add(*It);
+		}
+		TArray<FJObj> JP;
+		for (const TSharedPtr<FJsonValue>& V : JParams)
+		{
+			FJObj P = V->AsObject();
+			if (HexField(P, TEXT("f")) & (uint64)CPF_Parm)
+			{
+				JP.Add(P);
+			}
+		}
+		if (JP.Num() != Params.Num())
+		{
+			return false;
+		}
+		for (int32 i = 0; i < JP.Num(); ++i)
+		{
+			if (!Params[i]->GetFName().ToString().Equals(StrField(JP[i], TEXT("n")), ESearchCase::IgnoreCase)
+				|| Params[i]->GetClass()->GetFName() != FName(*StrField(JP[i], TEXT("t"))))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * The game's jmap functions of a class that the editor already has: a function the editor lacks is added (a registered thunk
+	 * as its body, else a script stub; static functions of a function library are not added, a stub would be called through
+	 * EX_CallMath), a function with another signature gets the registered thunk. Delegate signatures are skipped.
+	 */
+	void EngineClassFunctions(const FJObj& Def)
+	{
+		const FString Path = StrField(Def, TEXT("p"));
+		UClass* C = Cast<UClass>(Made.FindRef(Path));
+		const TArray<TSharedPtr<FJsonValue>>* Fns;
+		if (!C || !ExistingBefore.Contains(Path) || Failed.Contains(Path) || !Def->TryGetArrayField(TEXT("fn"), Fns))
+		{
+			return;
+		}
+		const bool bInLibrary = HasPathInChain(C, TEXT("/Script/Engine.BlueprintFunctionLibrary"));
+		int32 AddedToClass = 0;
+		for (const TSharedPtr<FJsonValue>& V : *Fns)
+		{
+			FJObj F = V->AsObject();
+			const uint32 Flags = (uint32)(uint64)F->GetNumberField(TEXT("f"));
+			if (StrField(F, TEXT("k")) != TEXT("F") || (Flags & FUNC_Delegate))
+			{
+				continue;
+			}
+			const FString Name = StrField(F, TEXT("n"));
+			const FString FuncPath = Path + TEXT(":") + Name;
+			const FName FnName(*Name);
+			const FNativeFuncPtr* Impl = ExtReg.NativeFunctions.Find(FuncPath);
+			static const TArray<TSharedPtr<FJsonValue>> NoParams;
+			const TArray<TSharedPtr<FJsonValue>>* Pr = nullptr;
+			F->TryGetArrayField(TEXT("pr"), Pr);
+			const TArray<TSharedPtr<FJsonValue>>& JParams = Pr ? *Pr : NoParams;
+
+			if (UFunction* Own = C->FindFunctionByName(FnName, EIncludeSuperFlag::ExcludeSuper))
+			{
+				if (SignatureMatches(Own, JParams))
+				{
+					continue;
+				}
+				if (Impl)
+				{
+					Own->SetNativeFunc(*Impl);
+					EngineFuncReplaced++;
+					UE_LOG(LogSuzie, Verbose, TEXT("Native replacement for %s"), *FuncPath);
+				}
+				else
+				{
+					EngineFuncDiffers++;
+					UE_LOG(LogSuzie, Warning, TEXT("Signature differs from the game: %s"), *FuncPath);
+				}
+				continue;
+			}
+			if (UFunction* Inherited = C->FindFunctionByName(FnName))
+			{
+				// an inherited function of that name is the one that runs: it is not shadowed by a stub
+				if (!SignatureMatches(Inherited, JParams))
+				{
+					EngineFuncDiffers++;
+					UE_LOG(LogSuzie, Warning, TEXT("Signature differs from the game (inherited): %s"), *FuncPath);
+				}
+				continue;
+			}
+			if (!Impl && bInLibrary && (Flags & FUNC_Static))
+			{
+				EngineFuncSkipped++;
+				continue;
+			}
+			UFunction* Fn = MakeFunctionShell(C, F);
+			if (!FillFunction(Fn, F, FuncPath, Impl ? *Impl : nullptr))
+			{
+				EngineFuncSkipped++;
+				UE_LOG(LogSuzie, Error, TEXT("Engine class function %s not added: parameter types"), *FuncPath);
+				continue;
+			}
+			Fn->Next = C->Children;
+			C->Children = Fn;
+			C->AddFunctionToFunctionMap(Fn, Fn->GetFName());
+			AddedToClass++;
+			if (Impl)
+			{
+				EngineFuncNative++;
+			}
+			else
+			{
+				EngineFuncStub++;
+			}
+		}
+		if (AddedToClass > 0)
+		{
+			// the class and its RF_Public members (the new functions) go to the script import table; re-adding an entry replaces it
+			Notify(C->GetOutermost(), C, ENotifyRegistrationType::NRT_Class);
+		}
 	}
 
 	// ------------------------------------------------------------------ classes
@@ -1261,6 +1409,10 @@ public:
 
 		// classes (super first)
 		for (const auto& V : Classes) FillClass(V->AsObject());
+		// functions the game has on engine classes that the editor lacks or has with another signature
+		for (const auto& V : Classes) EngineClassFunctions(V->AsObject());
+		UE_LOG(LogSuzie, Display, TEXT("engine class functions: added %d (native %d, stub %d), replaced %d, skipped %d, signature differs %d"),
+			EngineFuncNative + EngineFuncStub, EngineFuncNative, EngineFuncStub, EngineFuncReplaced, EngineFuncSkipped, EngineFuncDiffers);
 
 #if SUZIE_HAS_HOOK_LEVEL2
 		for (const FSzProfile::FPostSerialize& H : Profile->PostSerializeHandlers)
