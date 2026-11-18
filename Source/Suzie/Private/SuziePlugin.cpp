@@ -28,6 +28,7 @@
 #include "Gen/SzProfile.h"
 #include "Gen/SzBakedGenerator.h"
 #include "Gen/SzJmapSource.h"
+#include "AssetLoader/AssetLoader.h"
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 3
 #include "UObject/PropertyOptional.h"
 #endif
@@ -38,6 +39,9 @@ DEFINE_LOG_CATEGORY(LogSuzie);
 
 void FSuziePluginModule::StartupModule()
 {
+#if defined(UE_MODKIT_PACKAGE_FILTER)
+    SzAssetLoader::Startup();
+#endif
     UE_LOG(LogSuzie, Display, TEXT("Suzie plugin starting"));
 
     // Startup behaviour:
@@ -103,6 +107,9 @@ void FSuziePluginModule::StartupModule()
 
 void FSuziePluginModule::ShutdownModule()
 {
+#if defined(UE_MODKIT_PACKAGE_FILTER)
+    SzAssetLoader::Shutdown();
+#endif
     UE_LOG(LogSuzie, Display, TEXT("Suzie plugin shutting down"));
 }
 
