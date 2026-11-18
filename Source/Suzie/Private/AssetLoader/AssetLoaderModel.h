@@ -79,7 +79,11 @@ public:
 	/** Apply is refused only when OnlySelected has no selection. */
 	bool CanApply() const;
 
-	/** Packages reachable from Roots through hard package dependencies, roots included, restricted to packages with asset data. */
+	/**
+	 * Packages reachable from Roots, roots included. A package's dependencies are its hard package dependencies in the
+	 * registry plus the imported packages of its package store entry (cooked registries carry no dependencies; the
+	 * package store entry lists every package the loader needs first). Imports are read past the package filter.
+	 */
 	TSet<FName> ComputeHardDependencyClosure(const TSet<FName>& Roots) const;
 
 	/** Sets the mode, selection and dependency flag from an existing filter (used when AssetLoader.json does not exist). */
@@ -102,6 +106,7 @@ private:
 	bool bHasRegistry = false;
 	TArray<FAssetLoaderPackage> Packages; // sorted by PackageName
 	TMap<FName, int32> PackageIndex;      // PackageName -> index in Packages
+	TMap<uint64, FName> PackageIdIndex;   // FPackageId value -> PackageName, for every package in Packages
 
 	EAssetLoadMode Mode = EAssetLoadMode::OnlySelected;
 	TSet<FName> Selected;

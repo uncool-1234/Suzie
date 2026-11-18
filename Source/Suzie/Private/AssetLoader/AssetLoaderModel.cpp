@@ -10,6 +10,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "Serialization/PackageStore.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -123,6 +124,12 @@ void FAssetLoaderModel::SetRegistry(FAssetRegistryState&& State)
 	{
 		PackageIndex.Add(Packages[Index].PackageName, Index);
 	}
+	PackageIdIndex.Reset();
+	PackageIdIndex.Reserve(Packages.Num());
+	for (const FAssetLoaderPackage& Package : Packages)
+	{
+		PackageIdIndex.Add(FPackageId::FromName(Package.PackageName).Value(), Package.PackageName);
+	}
 }
 
 bool FAssetLoaderModel::HasRegistry() const
@@ -233,17 +240,37 @@ TSet<FName> FAssetLoaderModel::ComputeHardDependencyClosure(const TSet<FName>& R
 			Queue.Add(Root);
 		}
 	}
+	auto Visit = [&Visited, &Queue](const FName PackageName)
+	{
+		if (!PackageName.IsNone() && !Visited.Contains(PackageName))
+		{
+			Visited.Add(PackageName);
+			Queue.Add(PackageName);
+		}
+	};
+
+	Modkit::FPackageFilterBypassScope FilterBypass;
+	FPackageStore& PackageStore = FPackageStore::Get();
+	FPackageStoreReadScope ReadScope(PackageStore);
 	for (int32 Index = 0; Index < Queue.Num(); ++Index)
 	{
-		TArray<FAssetIdentifier> Dependencies;
 		const FName Current = Queue[Index];
+		TArray<FAssetIdentifier> Dependencies;
 		Registry.GetDependencies(FAssetIdentifier(Current), Dependencies, UE::AssetRegistry::EDependencyCategory::Package, UE::AssetRegistry::EDependencyQuery::Hard);
 		for (const FAssetIdentifier& Dependency : Dependencies)
 		{
-			if (!Dependency.PackageName.IsNone() && !Visited.Contains(Dependency.PackageName))
+			Visit(Dependency.PackageName);
+		}
+
+		FPackageStoreEntry Entry;
+		if (PackageStore.GetPackageStoreEntry(FPackageId::FromName(Current), Current, Entry) == EPackageStoreEntryStatus::Ok)
+		{
+			for (const FPackageId& ImportedId : Entry.ImportedPackageIds)
 			{
-				Visited.Add(Dependency.PackageName);
-				Queue.Add(Dependency.PackageName);
+				if (const FName* ImportedName = PackageIdIndex.Find(ImportedId.Value()))
+				{
+					Visit(*ImportedName);
+				}
 			}
 		}
 	}
