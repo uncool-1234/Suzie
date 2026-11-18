@@ -68,6 +68,34 @@ namespace
 		}
 	}
 
+	// Suzie.AssetLoader.Closure <long package name>: hard package dependency closure of one root in the premade registry (unfiltered).
+	void RunClosureCommand(const TArray<FString>& Args)
+	{
+		if (Args.Num() != 1)
+		{
+			UE_LOG(LogSuzie, Warning, TEXT("usage: Suzie.AssetLoader.Closure <long package name>"));
+			return;
+		}
+		FAssetLoaderModel Model;
+		if (Model.LoadPremadeRegistry().IsEmpty())
+		{
+			UE_LOG(LogSuzie, Warning, TEXT("Suzie.AssetLoader.Closure: no premade asset registry found."));
+			return;
+		}
+		TArray<FName> Members = Model.ComputeHardDependencyClosure(TSet<FName>{ FName(*Args[0]) }).Array();
+		Members.Sort([](const FName& A, const FName& B) { return A.Compare(B) < 0; });
+		UE_LOG(LogSuzie, Display, TEXT("closure root=%s size=%d"), *Args[0], Members.Num());
+		for (int32 Index = 0; Index < Members.Num() && Index < 20; ++Index)
+		{
+			UE_LOG(LogSuzie, Display, TEXT("closure member %s"), *Members[Index].ToString());
+		}
+	}
+
+	FAutoConsoleCommand GAssetLoaderClosureCmd(
+		TEXT("Suzie.AssetLoader.Closure"),
+		TEXT("Suzie.AssetLoader.Closure <long package name>: hard package dependency closure in the premade registry"),
+		FConsoleCommandWithArgsDelegate::CreateStatic(&RunClosureCommand));
+
 	FAutoConsoleCommand GAssetLoaderOpenCmd(
 		TEXT("Suzie.AssetLoader.Open"),
 		TEXT("Suzie.AssetLoader.Open: opens the Asset Loader window (same as its toolbar button)"),
