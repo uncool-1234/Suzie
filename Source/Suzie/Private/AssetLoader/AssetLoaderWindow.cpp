@@ -265,16 +265,6 @@ public:
 			CloseWindow();
 			return FReply::Handled();
 		}
-		if (InKeyEvent.GetKey() == EKeys::SpaceBar && LeftList.IsValid() && IsLeftEnabled())
-		{
-			for (const FName PackageName : LeftList->GetSelectedItems())
-			{
-				Model->SetSelected(PackageName, !Model->IsSelected(PackageName));
-			}
-			RebuildRightItems();
-			RightList->RequestListRefresh();
-			return FReply::Handled();
-		}
 		return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
 	}
 
@@ -327,6 +317,7 @@ private:
 						.SelectionMode(ESelectionMode::Multi)
 						.IsEnabled(this, &SAssetLoaderWindow::IsLeftEnabled)
 						.OnContextMenuOpening(this, &SAssetLoaderWindow::OnLeftContextMenu)
+						.OnKeyDownHandler(this, &SAssetLoaderWindow::OnLeftListKeyDown)
 						.HeaderRow(MakeHeader(true))
 					]
 				]
@@ -557,6 +548,21 @@ private:
 		}
 		RebuildRightItems();
 		RightList->RequestListRefresh();
+	}
+
+	FReply OnLeftListKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
+	{
+		if (InKeyEvent.GetKey() == EKeys::SpaceBar && IsLeftEnabled() && LeftList.IsValid())
+		{
+			for (const FName PackageName : LeftList->GetSelectedItems())
+			{
+				Model->SetSelected(PackageName, !Model->IsSelected(PackageName));
+			}
+			RebuildRightItems();
+			RightList->RequestListRefresh();
+			return FReply::Handled();
+		}
+		return FReply::Unhandled();
 	}
 
 	TSharedPtr<SWidget> OnLeftContextMenu()

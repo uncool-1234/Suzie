@@ -373,6 +373,7 @@ bool FAssetLoaderModel::ReadFilterFile(const FString& File, FAssetFilter& OutFil
 		return false;
 	}
 	OutFilter = FAssetFilter();
+	TSet<FName> PackageSet;
 	bool bHeaderSeen = false;
 	for (FString& Line : Lines)
 	{
@@ -405,8 +406,9 @@ bool FAssetLoaderModel::ReadFilterFile(const FString& File, FAssetFilter& OutFil
 			else { UE_LOG(LogSuzie, Warning, TEXT("Asset Loader: '%s' has unknown mode '%s'; treated as Off."), *File, *Value); }
 			continue;
 		}
-		OutFilter.Packages.AddUnique(FName(*Line));
+		PackageSet.Add(FName(*Line));
 	}
+	OutFilter.Packages = PackageSet.Array();
 	SortNames(OutFilter.Packages);
 	return true;
 }
