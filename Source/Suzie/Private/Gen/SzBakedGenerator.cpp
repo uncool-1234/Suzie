@@ -1566,8 +1566,8 @@ public:
 		}
 		if (bCdoValues)
 		{
-			UE_LOG(LogSuzie, Log, TEXT("Suzie: CDO values: classes=%d applied=%d skipped=%d typeMismatch=%d unresolvedObjects=%d subobjects=%d"),
-				ValueStats.Classes, ValueStats.Applied, ValueStats.Skipped, ValueStats.TypeMismatch, ValueStats.UnresolvedObjects, ValueStats.Subobjects);
+			UE_LOG(LogSuzie, Log, TEXT("Suzie: CDO values: classes=%d applied=%d skipped=%d typeMismatch=%d unresolvedObjects=%d subobjects=%d cdoInternal=%d"),
+				ValueStats.Classes, ValueStats.Applied, ValueStats.Skipped, ValueStats.TypeMismatch, ValueStats.UnresolvedObjects, ValueStats.Subobjects, ValueStats.CdoInternal);
 		}
 		else
 		{

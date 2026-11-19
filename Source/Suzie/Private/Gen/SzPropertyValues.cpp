@@ -142,7 +142,14 @@ bool ApplyValue(FApplyCtx& Ctx, const FProperty* Property, void* Ptr, const TSha
 			Obj = StaticFindObject(ObjProp->PropertyClass, nullptr, *ObjPath);
 			if (!Obj)
 			{
-				Ctx.Stats.UnresolvedObjects++;
+				if (ObjPath.Contains(TEXT("Default__")))
+				{
+					Ctx.Stats.CdoInternal++;
+				}
+				else
+				{
+					Ctx.Stats.UnresolvedObjects++;
+				}
 				return false;
 			}
 		}

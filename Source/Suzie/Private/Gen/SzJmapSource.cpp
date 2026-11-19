@@ -324,6 +324,12 @@ public:
 		return R;
 	}
 
+	bool IsDefaultSubobject(const FString& Name) const
+	{
+		const FJObj V = Obj(Name);
+		return V.IsValid() && Str(V, TEXT("object_flags")).Contains(TEXT("RF_DefaultSubObject"));
+	}
+
 	FJObj EncClass(const FString& Name, const FJObj& V)
 	{
 		FJObj R = MakeShared<FJsonObject>();
@@ -358,7 +364,7 @@ public:
 			if (F.IsValid() && Str(F, TEXT("type")) == TEXT("Function")) Functions.Add(MakeShared<FJsonValueObject>(EncFunc(Child, F)));
 		}
 		if (Functions.Num()) R->SetArrayField(TEXT("fn"), Functions);
-		// default subobjects: the direct children of the CDO and their direct children
+		// default subobjects: the direct children of the CDO and their direct children that carry RF_DefaultSubObject
 		const FString Cdo = Str(V, TEXT("class_default_object"));
 		const FString Prefix = Cdo + TEXT(":");
 		FJArr Subs;
@@ -366,10 +372,14 @@ public:
 		{
 			for (const FString& S : *Direct)
 			{
+				if (!IsDefaultSubobject(S)) continue;
 				Subs.Add(MakeShared<FJsonValueObject>(EncSubobject(S, Prefix)));
 				if (const TArray<FString>* Nested = Subobjects.Find(S))
 				{
-					for (const FString& S2 : *Nested) Subs.Add(MakeShared<FJsonValueObject>(EncSubobject(S2, Prefix)));
+					for (const FString& S2 : *Nested)
+					{
+						if (IsDefaultSubobject(S2)) Subs.Add(MakeShared<FJsonValueObject>(EncSubobject(S2, Prefix)));
+					}
 				}
 			}
 		}

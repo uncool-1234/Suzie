@@ -15,6 +15,7 @@ struct FSzValueStats
 	int32 Skipped = 0;           // properties not applied: instanced, deprecated, delegate, interface or unsupported type
 	int32 TypeMismatch = 0;      // listed values of a kind the property cannot take (left untouched)
 	int32 UnresolvedObjects = 0; // object references whose object does not exist (left untouched)
+	int32 CdoInternal = 0;       // object references into a class default object whose object does not exist (left untouched)
 	int32 Subobjects = 0;        // default subobjects with listed values
 };
 
