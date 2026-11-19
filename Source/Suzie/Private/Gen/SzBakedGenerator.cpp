@@ -112,6 +112,8 @@ TMap<UClass*, TArray<TPair<FName, UClass*>>> GSubobjectDefs; // default subobjec
 // Properties whose jmap values are set on a generated class's default object, parent entries first. A new instance takes these
 // values from its class's default object, and a default object takes them from its generated parent's (SzGenericConstruct).
 TMap<UClass*, TArray<FProperty*>> GCdoValueProps;
+// The subset of a class's value properties whose value on its default object references objects inside that default object.
+TMap<UClass*, TArray<FProperty*>> GCdoRefProps;
 
 // The default subobject of a default object that a "so" record names. A nested record ("Outer:Name" with outer "Outer") is looked up under its outer.
 UObject* FindDefaultSubobject(UObject* CDO, const FJObj& So)
@@ -291,7 +293,11 @@ void SzGenericConstruct(const FObjectInitializer& OI)
 			{
 				Prop->CopyCompleteValue_InContainer(Obj, Source);
 			}
-			RemapCopiedReferences(Obj, Source, *Props);
+			const TArray<FProperty*>* RefProps = GCdoRefProps.Find(Source->GetClass());
+			if (RefProps && RefProps->Num())
+			{
+				RemapCopiedReferences(Obj, Source, *RefProps);
+			}
 		}
 	}
 }
@@ -1090,6 +1096,24 @@ public:
 		{
 			Union.AddUnique(Prop);
 		}
+		TSet<const FProperty*> Listed;
+		for (const FProperty* Prop : Union)
+		{
+			Listed.Add(Prop);
+		}
+		TArray<FProperty*> RefProps;
+		TArray<const FProperty*> Chain;
+		for (TPropertyValueIterator<FObjectProperty> It(C, CDO); It; ++It)
+		{
+			Chain.Reset();
+			It.GetPropertyChain(Chain);
+			const UObject* Ref = It.Key()->GetObjectPropertyValue(It.Value());
+			if (!Chain.IsEmpty() && Listed.Contains(Chain.Last()) && Ref && Ref->IsIn(CDO))
+			{
+				RefProps.AddUnique(const_cast<FProperty*>(Chain.Last()));
+			}
+		}
+		GCdoRefProps.Add(C, MoveTemp(RefProps));
 		GCdoValueProps.Add(C, MoveTemp(Union));
 	}
 
@@ -1606,6 +1630,7 @@ public:
 		// CDOs (class order is super first: a class's shell needs its super)
 		const bool bCdoValues = !FParse::Param(FCommandLine::Get(), TEXT("SuzieNoCdoValues"));
 		GCdoValueProps.Reset();
+		GCdoRefProps.Reset();
 		int32 CdoCount = 0;
 		for (const FString& Path : ClassOrder)
 		{
