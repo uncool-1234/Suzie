@@ -1,5 +1,5 @@
 // Generic, game agnostic: console commands for the profile driven generator.
-//   Suzie.GenerateNativeTypes   Suzie.VerifyNativeTypes   Suzie.DumpClass <class path>
+//   Suzie.GenerateNativeTypes   Suzie.VerifyNativeTypes   Suzie.DumpClass <class path>   Suzie.DumpObjectRefs <object path>
 //   Suzie.DumpAll <out file>    Suzie.TagInfo [tag...|refresh]
 #include "SzBakedGenerator.h"
 #include "SzJmapSource.h"
@@ -150,6 +150,9 @@ void RunVerify()
 		}
 	}
 	UE_LOG(LogSuzie, Log, TEXT("VERIFY RESULT: types=%d ok=%d mismatch=%d"), Total, Ok, Bad);
+	int32 Remapped = 0, Nulled = 0;
+	FSzBakedGenerator::GetReferenceRemapCounts(Remapped, Nulled);
+	UE_LOG(LogSuzie, Log, TEXT("VERIFY references: remapped=%d nulled=%d"), Remapped, Nulled);
 }
 
 void RunDumpClass(const TArray<FString>& Args)
@@ -164,6 +167,34 @@ void RunDumpClass(const TArray<FString>& Args)
 		{
 			UE_LOG(LogSuzie, Log, TEXT("DUMP   %s : %s off=%d dim=%d owner=%s"), *It->GetName(), *It->GetClass()->GetName(), It->GetOffset_ForInternal(), It->ArrayDim, *It->GetOwnerVariant().GetFullName());
 		}
+	}
+}
+
+// Lists the object references of an object (of a class: its default object) and whether each points into the object itself.
+void RunDumpObjectRefs(const TArray<FString>& Args)
+{
+	if (Args.Num() < 1) return;
+	UObject* Obj = StaticFindObject(UObject::StaticClass(), nullptr, *Args[0]);
+	if (UClass* C = Cast<UClass>(Obj)) Obj = C->GetDefaultObject(false);
+	if (!Obj) { UE_LOG(LogSuzie, Warning, TEXT("DumpObjectRefs: %s not found"), *Args[0]); return; }
+	TArray<const FProperty*> Chain;
+	for (TPropertyValueIterator<FObjectPropertyBase> It(Obj->GetClass(), Obj); It; ++It)
+	{
+		const FObjectPropertyBase* Prop = It.Key();
+		if (CastField<FSoftObjectProperty>(Prop)) continue;
+		UObject* Ref = Prop->GetObjectPropertyValue(It.Value());
+		if (!Ref) continue;
+		Chain.Reset();
+		It.GetPropertyChain(Chain);
+		FString PropPath;
+		for (int32 i = Chain.Num() - 1; i >= 0; --i)
+		{
+			if (!PropPath.IsEmpty()) PropPath += TEXT(".");
+			PropPath += Chain[i]->GetName();
+		}
+		bool bOuterIsSelf = false;
+		for (const UObject* O = Ref->GetOuter(); O && !bOuterIsSelf; O = O->GetOuter()) bOuterIsSelf = O == Obj;
+		UE_LOG(LogSuzie, Log, TEXT("%s -> %s (outer is self: %s)"), *PropPath, *Ref->GetPathName(), bOuterIsSelf ? TEXT("yes") : TEXT("no"));
 	}
 }
 
@@ -424,6 +455,7 @@ FAutoConsoleCommand GGenerateCmd(TEXT("Suzie.GenerateNativeTypes"), TEXT("Suzie.
 FAutoConsoleCommand GVerifyCmd(TEXT("Suzie.VerifyNativeTypes"), TEXT("Suzie.VerifyNativeTypes: compare the generated types' property lists, sizes and offsets with the jmap"),
 	FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args) { RunVerify(); }));
 FAutoConsoleCommand GDumpClassCmd(TEXT("Suzie.DumpClass"), TEXT("Suzie.DumpClass <class path>"), FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args) { RunDumpClass(Args); }));
+FAutoConsoleCommand GDumpObjectRefsCmd(TEXT("Suzie.DumpObjectRefs"), TEXT("Suzie.DumpObjectRefs <object path>: object references of an object (of a class: its default object)"), FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args) { SuzieCommands::RunDumpObjectRefs(Args); }));
 FAutoConsoleCommand GDumpAllCmd(TEXT("Suzie.DumpAll"), TEXT("Suzie.DumpAll <out file>: canonical reflection dump of all profile types"), FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args) { RunDumpAll(GetProfile(), Args); }));
 FAutoConsoleCommand GTagInfoCmd(TEXT("Suzie.TagInfo"), TEXT("Suzie.TagInfo [tag...|refresh]"), FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args) { RunTagInfo(GetProfile(), Args); }));
 
