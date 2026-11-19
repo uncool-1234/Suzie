@@ -21,6 +21,10 @@ struct FSzExtensionRegistry
 {
 	TMap<FName, TFunction<UScriptStruct::ICppStructOps*()>> StructOps;
 	TMap<FName, FSzPostSerializeFn> PostSerialize;
+	/** Native thunks by function path, "/Script/<Package>.<Class>:<Function>"; bound to the jmap function of an engine class (see SzBakedGenerator). */
+	TMap<FString, FNativeFuncPtr> NativeFunctions;
+
+	void AddNativeFunction(const FString& Path, FNativeFuncPtr Fn) { NativeFunctions.Add(Path, Fn); }
 
 	/** Registers ops for a plain C++ struct that has a TStructOpsTypeTraits specialisation (e.g. WithSerializer). */
 	template <typename StructT>
