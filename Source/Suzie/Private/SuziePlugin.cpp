@@ -15,6 +15,7 @@
 #include "UObject/PropertyPortFlags.h"
 #include "HAL/PlatformFileManager.h"
 #include "Editor/EditorEngine.h"
+#include "Editor.h"
 #include "Framework/Commands/UICommandList.h"
 #include "Engine/EngineTypes.h"
 #include "PropertyEditorModule.h"
