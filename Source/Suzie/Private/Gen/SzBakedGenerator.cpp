@@ -1,5 +1,6 @@
 #include "SzBakedGenerator.h"
 #include "SzJmapSource.h"
+#include "SzPropertyValues.h"
 #include "SuziePlugin.h"
 
 #include "Dom/JsonValue.h"
@@ -108,6 +109,32 @@ FString LeafOfPath(const FString& Path)
 TSet<UClass*> GGeneratedClasses;
 bool GFillDone = false;
 TMap<UClass*, TArray<TPair<FName, UClass*>>> GSubobjectDefs; // default subobjects per generated class (jmap CDO children)
+// Properties whose jmap values are set on a generated class's default object, parent entries first. A new instance takes these
+// values from its class's default object, and a default object takes them from its generated parent's (SzGenericConstruct).
+TMap<UClass*, TArray<FProperty*>> GCdoValueProps;
+
+// The default subobject of a default object that a "so" record names. A nested record ("Outer:Name" with outer "Outer") is looked up under its outer.
+UObject* FindDefaultSubobject(UObject* CDO, const FJObj& So)
+{
+	FString Name = StrField(So, TEXT("n"));
+	UObject* Outer = CDO;
+	if (So->HasField(TEXT("outer")))
+	{
+		const FString OuterName = StrField(So, TEXT("outer"));
+		int32 Colon;
+		if (!Name.FindLastChar(TEXT(':'), Colon) || OuterName.Contains(TEXT(":")))
+		{
+			return nullptr;
+		}
+		Outer = StaticFindObjectFast(UObject::StaticClass(), CDO, FName(*OuterName));
+		Name = Name.Mid(Colon + 1);
+	}
+	else if (Name.Contains(TEXT(":")))
+	{
+		return nullptr;
+	}
+	return Outer ? StaticFindObjectFast(UObject::StaticClass(), Outer, FName(*Name)) : nullptr;
+}
 
 void SzGenericConstruct(const FObjectInitializer& OI)
 {
@@ -189,6 +216,23 @@ void SzGenericConstruct(const FObjectInitializer& OI)
 		for (TFieldIterator<FProperty> It(Chain[i], EFieldIterationFlags::IncludeDeprecated); It; ++It)
 		{
 			It->InitializeValue_InContainer(Obj);
+		}
+	}
+	// The source is the class default object of the most derived generated class, or for that default object the one of its generated parent.
+	const bool bIsKDefault = K && Obj->HasAnyFlags(RF_ClassDefaultObject) && Obj->GetClass() == K;
+	UObject* Source = nullptr;
+	if (K)
+	{
+		Source = bIsKDefault ? (Chain.Num() > 1 ? Chain[1]->GetDefaultObject(false) : nullptr) : K->GetDefaultObject(false);
+	}
+	if (Source && Source != Obj)
+	{
+		if (const TArray<FProperty*>* Props = GCdoValueProps.Find(Source->GetClass()))
+		{
+			for (FProperty* Prop : *Props)
+			{
+				Prop->CopyCompleteValue_InContainer(Obj, Source);
+			}
 		}
 	}
 }
@@ -947,6 +991,48 @@ public:
 
 	TMap<FString, FJObj> ClassDefs;
 	TArray<FString> ClassOrder;
+	FSzValueStats ValueStats;
+
+	/** Applies the jmap values of a generated class's default object and of its default subobjects, and records the class's value properties. */
+	void ApplyCdoValues(UClass* C, UObject* CDO, const FJObj& Def)
+	{
+		TArray<FProperty*> Applied;
+		const FJObj* Values = nullptr;
+		if (Def->TryGetObjectField(TEXT("cdo"), Values) && Values && Values->IsValid())
+		{
+			ValueStats.Classes++;
+			SzApplyPropertyValues(C, CDO, *Values, ValueStats, &Applied);
+		}
+		const TArray<TSharedPtr<FJsonValue>>* Sos = nullptr;
+		if (Def->TryGetArrayField(TEXT("so"), Sos))
+		{
+			for (const TSharedPtr<FJsonValue>& V : *Sos)
+			{
+				const FJObj So = V->AsObject();
+				const FJObj* Pv = nullptr;
+				if (!So.IsValid() || !So->TryGetObjectField(TEXT("pv"), Pv) || !Pv || !Pv->IsValid())
+				{
+					continue;
+				}
+				if (UObject* Sub = FindDefaultSubobject(CDO, So))
+				{
+					SzApplyPropertyValues(Sub->GetClass(), Sub, *Pv, ValueStats, nullptr);
+					ValueStats.Subobjects++;
+				}
+			}
+		}
+		// the parent's properties come first; the class's own values are added without duplicates
+		TArray<FProperty*> Union;
+		if (const TArray<FProperty*>* ParentProps = GCdoValueProps.Find(C->GetSuperClass()))
+		{
+			Union = *ParentProps;
+		}
+		for (FProperty* Prop : Applied)
+		{
+			Union.AddUnique(Prop);
+		}
+		GCdoValueProps.Add(C, MoveTemp(Union));
+	}
 
 	static bool HasPathInChain(const UClass* C, const TCHAR* Path)
 	{
@@ -1458,7 +1544,9 @@ public:
 		}
 
 		GFillDone = true;
-		// CDOs
+		// CDOs (class order is super first: a class's shell needs its super)
+		const bool bCdoValues = !FParse::Param(FCommandLine::Get(), TEXT("SuzieNoCdoValues"));
+		GCdoValueProps.Reset();
 		int32 CdoCount = 0;
 		for (const FString& Path : ClassOrder)
 		{
@@ -1467,10 +1555,23 @@ public:
 			{
 				if (C->IsChildOf(UObject::StaticClass()) && C->GetSuperClass() && !Failed.Contains(C->GetSuperClass()->GetPathName()))
 				{
-					C->GetDefaultObject();
+					UObject* CDO = C->GetDefaultObject();
 					CdoCount++;
+					if (bCdoValues)
+					{
+						ApplyCdoValues(C, CDO, ClassDefs.FindRef(Path));
+					}
 				}
 			}
+		}
+		if (bCdoValues)
+		{
+			UE_LOG(LogSuzie, Log, TEXT("Suzie: CDO values: classes=%d applied=%d skipped=%d typeMismatch=%d unresolvedObjects=%d subobjects=%d"),
+				ValueStats.Classes, ValueStats.Applied, ValueStats.Skipped, ValueStats.TypeMismatch, ValueStats.UnresolvedObjects, ValueStats.Subobjects);
+		}
+		else
+		{
+			UE_LOG(LogSuzie, Log, TEXT("Suzie: CDO values disabled by -SuzieNoCdoValues"));
 		}
 		Stats.Seconds = FPlatformTime::Seconds() - T0;
 		UE_LOG(LogSuzie, Log, TEXT("CDOs created: %d"), CdoCount);

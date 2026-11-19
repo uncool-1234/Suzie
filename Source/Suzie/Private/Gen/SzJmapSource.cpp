@@ -2,7 +2,8 @@
 //
 // Record keys of the derived types (consumed by SzBakedGenerator.cpp):
 //   class    p path, sup super, fl class flags (hex), sz properties size, within ClassWithin when not Object,
-//            if [{c interface class, o pointer offset, k2}], pr properties, fn functions, so default subobjects [{n, c, fl, outer?}]
+//            if [{c interface class, o pointer offset, k2}], pr properties, fn functions, so default subobjects [{n, c, fl, outer?, pv?}],
+//            cdo property values of the class default object (object: property name -> JSON value), pv property values of a default subobject
 //   struct   p, sup, fl struct flags (hex), sz, al alignment, pr
 //   enum     p, n [[name, value]], cpp cpp form, ct cpp type
 //   function n name, k F|D|S (function, delegate, sparse delegate), f function flags, sup, sz params size, pr params;
@@ -319,6 +320,7 @@ public:
 		R->SetStringField(TEXT("fl"), Str(V, TEXT("object_flags")).Replace(TEXT("RF_"), TEXT(""), ESearchCase::CaseSensitive).Replace(TEXT(" | "), TEXT("|")));
 		const FString Outer = Str(V, TEXT("outer"));
 		if (Outer != Prefix.LeftChop(1) && Outer.StartsWith(Prefix, ESearchCase::CaseSensitive)) R->SetStringField(TEXT("outer"), Outer.Mid(Prefix.Len()));
+		if (const FJObj Values = Sub(V, TEXT("property_values"))) R->SetObjectField(TEXT("pv"), Values);
 		return R;
 	}
 
@@ -372,6 +374,10 @@ public:
 			}
 		}
 		if (Subs.Num()) R->SetArrayField(TEXT("so"), Subs);
+		if (const FJObj CdoObj = Obj(Cdo))
+		{
+			if (const FJObj Values = Sub(CdoObj, TEXT("property_values"))) R->SetObjectField(TEXT("cdo"), Values);
+		}
 		return R;
 	}
 
