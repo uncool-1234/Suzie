@@ -1417,7 +1417,7 @@ public:
 		const double T0 = FPlatformTime::Seconds();
 		Root = Source.Types;
 		// flags that property creation derives on its own
-		DerivedMask = CPF_ZeroConstructor | CPF_IsPlainOldData | CPF_NoDestructor | CPF_HasGetValueTypeHash | CPF_UObjectWrapper | CPF_TObjectPtr | CPF_ContainsInstancedReference;
+		DerivedMask = CPF_ZeroConstructor | CPF_IsPlainOldData | CPF_NoDestructor | CPF_HasGetValueTypeHash | CPF_UObjectWrapper | CPF_TObjectPtr;
 
 		const TArray<TSharedPtr<FJsonValue>>& Enums = Root->GetArrayField(TEXT("enums"));
 		const TArray<TSharedPtr<FJsonValue>>& Structs = Root->GetArrayField(TEXT("structs"));
