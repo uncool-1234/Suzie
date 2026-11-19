@@ -579,11 +579,31 @@ public:
 			D.Add(MakeShared<FJsonValueObject>(R));
 		}
 
+		// functions of the classes the editor already has (not generated): the generator binds or adds them to the live class
+		FJArr EngineFunctions;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& KV : O)
+		{
+			if (!KV.Value.IsValid() || KV.Value->Type != EJson::Object) continue;
+			const FJObj V = KV.Value->AsObject();
+			if (Str(V, TEXT("type")) != TEXT("Class") || MissingClasses.Contains(KV.Key) || !EditorTypes.Contains(KV.Key)) continue;
+			for (const TSharedPtr<FJsonValue>& Child : Arr(V, TEXT("children")))
+			{
+				const FString ChildName = Child->AsString();
+				const FJObj F = Obj(ChildName);
+				if (!F.IsValid() || Str(F, TEXT("type")) != TEXT("Function")) continue;
+				FJObj R = EncFunc(ChildName, F);
+				if ((uint64)R->GetNumberField(TEXT("f")) & (uint64)FUNC_Delegate) continue;
+				R->SetStringField(TEXT("owner"), KV.Key);
+				EngineFunctions.Add(MakeShared<FJsonValueObject>(R));
+			}
+		}
+
 		Out.Types = MakeShared<FJsonObject>();
 		Out.Types->SetArrayField(TEXT("enums"), E);
 		Out.Types->SetArrayField(TEXT("structs"), S);
 		Out.Types->SetArrayField(TEXT("classes"), C);
 		Out.Types->SetArrayField(TEXT("delegates"), D);
+		Out.Types->SetArrayField(TEXT("engine_class_functions"), EngineFunctions);
 
 		ReadTags();
 		for (const TPair<FString, int32>& U : UnknownFlags)

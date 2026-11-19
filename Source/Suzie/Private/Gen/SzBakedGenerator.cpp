@@ -856,18 +856,16 @@ public:
 	 * as its body, else a script stub; static functions of a function library are not added, a stub would be called through
 	 * EX_CallMath), a function with another signature gets the registered thunk. Delegate signatures are skipped.
 	 */
-	void EngineClassFunctions(const FJObj& Def)
+	void EngineClassFunctions(const FString& Path, const TArray<TSharedPtr<FJsonValue>>& Fns)
 	{
-		const FString Path = StrField(Def, TEXT("p"));
-		UClass* C = Cast<UClass>(Made.FindRef(Path));
-		const TArray<TSharedPtr<FJsonValue>>* Fns;
-		if (!C || !ExistingBefore.Contains(Path) || Failed.Contains(Path) || !Def->TryGetArrayField(TEXT("fn"), Fns))
+		UClass* C = FindObject<UClass>(nullptr, *Path);
+		if (!C)
 		{
 			return;
 		}
 		const bool bInLibrary = HasPathInChain(C, TEXT("/Script/Engine.BlueprintFunctionLibrary"));
 		int32 AddedToClass = 0;
-		for (const TSharedPtr<FJsonValue>& V : *Fns)
+		for (const TSharedPtr<FJsonValue>& V : Fns)
 		{
 			FJObj F = V->AsObject();
 			const uint32 Flags = (uint32)(uint64)F->GetNumberField(TEXT("f"));
@@ -1410,7 +1408,22 @@ public:
 		// classes (super first)
 		for (const auto& V : Classes) FillClass(V->AsObject());
 		// functions the game has on engine classes that the editor lacks or has with another signature
-		for (const auto& V : Classes) EngineClassFunctions(V->AsObject());
+		{
+			TMap<FString, TArray<TSharedPtr<FJsonValue>>> EngineFns;
+			const TArray<TSharedPtr<FJsonValue>>* Listed = nullptr;
+			if (Root->TryGetArrayField(TEXT("engine_class_functions"), Listed))
+			{
+				for (const TSharedPtr<FJsonValue>& V : *Listed)
+				{
+					FJObj F = V->AsObject();
+					EngineFns.FindOrAdd(StrField(F, TEXT("owner"))).Add(V);
+				}
+			}
+			for (const TPair<FString, TArray<TSharedPtr<FJsonValue>>>& KV : EngineFns)
+			{
+				EngineClassFunctions(KV.Key, KV.Value);
+			}
+		}
 		UE_LOG(LogSuzie, Display, TEXT("engine class functions: added %d (native %d, stub %d), replaced %d, skipped %d, signature differs %d"),
 			EngineFuncNative + EngineFuncStub, EngineFuncNative, EngineFuncStub, EngineFuncReplaced, EngineFuncSkipped, EngineFuncDiffers);
 
