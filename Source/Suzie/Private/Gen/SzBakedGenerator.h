@@ -39,6 +39,8 @@ class FSzBakedGenerator
 public:
 	static bool Generate(const FSzProfile& Profile, const FSzJmapTypes& Source, FSzGenStats& OutStats);
 	static TMap<FString, FSzGeneratedType>& GetGenerated();
+	/** Object references of copied default-object values that the shared constructor remapped to a new object's subobjects, and those it nulled. */
+	static void GetReferenceRemapCounts(int32& OutRemapped, int32& OutNulled);
 };
 
 namespace SuzieCommands { void RunGenerateFromModule(const FSzProfile& Profile); }

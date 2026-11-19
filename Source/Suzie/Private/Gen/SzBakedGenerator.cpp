@@ -136,6 +136,64 @@ UObject* FindDefaultSubobject(UObject* CDO, const FJObj& So)
 	return Outer ? StaticFindObjectFast(UObject::StaticClass(), Outer, FName(*Name)) : nullptr;
 }
 
+int32 GRefsRemapped = 0; // object references of copied values that were pointed at the same-named object of the new object
+int32 GRefsNulled = 0;   // object references of copied values into the source that the new object has no object for
+
+// The object below Obj that has the name path of Ref below Source, or null.
+UObject* FindCounterpart(UObject* Obj, const UObject* Source, const UObject* Ref)
+{
+	if (Ref == Source)
+	{
+		return Obj;
+	}
+	TArray<FName, TInlineAllocator<8>> Names;
+	for (const UObject* O = Ref; O && O != Source; O = O->GetOuter())
+	{
+		Names.Add(O->GetFName());
+	}
+	UObject* Cur = Obj;
+	for (int32 i = Names.Num() - 1; i >= 0 && Cur; --i)
+	{
+		Cur = StaticFindObjectFast(UObject::StaticClass(), Cur, Names[i]);
+	}
+	return Cur;
+}
+
+// Object references of the copied properties that point into Source are pointed at the counterpart in Obj, or nulled when there is none.
+void RemapCopiedReferences(UObject* Obj, UObject* Source, const TArray<FProperty*>& Props)
+{
+	TSet<const FProperty*> Copied;
+	for (const FProperty* Prop : Props)
+	{
+		Copied.Add(Prop);
+	}
+	TArray<const FProperty*> Chain;
+	for (TPropertyValueIterator<FObjectProperty> It(Obj->GetClass(), Obj); It; ++It)
+	{
+		Chain.Reset();
+		It.GetPropertyChain(Chain);
+		if (Chain.IsEmpty() || !Copied.Contains(Chain.Last()))
+		{
+			continue;
+		}
+		UObject* Ref = It.Key()->GetObjectPropertyValue(It.Value());
+		if (!Ref || !Ref->IsIn(Source))
+		{
+			continue;
+		}
+		UObject* Counterpart = FindCounterpart(Obj, Source, Ref);
+		It.Key()->SetObjectPropertyValue(const_cast<void*>(It.Value()), Counterpart);
+		if (Counterpart)
+		{
+			GRefsRemapped++;
+		}
+		else
+		{
+			GRefsNulled++;
+		}
+	}
+}
+
 void SzGenericConstruct(const FObjectInitializer& OI)
 {
 	UClass* Cls = OI.GetClass();
@@ -233,6 +291,7 @@ void SzGenericConstruct(const FObjectInitializer& OI)
 			{
 				Prop->CopyCompleteValue_InContainer(Obj, Source);
 			}
+			RemapCopiedReferences(Obj, Source, *Props);
 		}
 	}
 }
@@ -1566,8 +1625,10 @@ public:
 		}
 		if (bCdoValues)
 		{
-			UE_LOG(LogSuzie, Log, TEXT("Suzie: CDO values: classes=%d applied=%d skipped=%d typeMismatch=%d unresolvedObjects=%d subobjects=%d cdoInternal=%d"),
-				ValueStats.Classes, ValueStats.Applied, ValueStats.Skipped, ValueStats.TypeMismatch, ValueStats.UnresolvedObjects, ValueStats.Subobjects, ValueStats.CdoInternal);
+			UE_LOG(LogSuzie, Log, TEXT("Suzie: CDO values: classes=%d applied=%d skipped=%d typeMismatch=%d unresolvedObjects=%d subobjects=%d cdoInternal=%d instancedApplied=%d instancedForeign=%d"),
+				ValueStats.Classes, ValueStats.Applied, ValueStats.Skipped, ValueStats.TypeMismatch, ValueStats.UnresolvedObjects, ValueStats.Subobjects, ValueStats.CdoInternal,
+				ValueStats.InstancedApplied, ValueStats.InstancedForeign);
+			UE_LOG(LogSuzie, Log, TEXT("Suzie: CDO references: remapped=%d nulled=%d"), GRefsRemapped, GRefsNulled);
 		}
 		else
 		{
@@ -1579,6 +1640,12 @@ public:
 	}
 };
 } // namespace
+
+void FSzBakedGenerator::GetReferenceRemapCounts(int32& OutRemapped, int32& OutNulled)
+{
+	OutRemapped = GRefsRemapped;
+	OutNulled = GRefsNulled;
+}
 
 bool FSzBakedGenerator::Generate(const FSzProfile& Profile, const FSzJmapTypes& Source, FSzGenStats& OutStats)
 {

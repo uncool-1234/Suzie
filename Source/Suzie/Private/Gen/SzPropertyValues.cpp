@@ -3,6 +3,7 @@
 
 #include "Dom/JsonValue.h"
 #include "Runtime/Launch/Resources/Version.h"
+#include "Templates/UniquePtr.h"
 #include "UObject/Class.h"
 #include "UObject/PropertyOptional.h"
 #include "UObject/TextProperty.h"
@@ -15,10 +16,12 @@ int32 GMismatchLogged = 0;
 
 struct FApplyCtx
 {
-	explicit FApplyCtx(FSzValueStats& InStats) : Stats(InStats) {}
+	FApplyCtx(FSzValueStats& InStats, UObject* InOwner) : Stats(InStats), Owner(InOwner) {}
 
 	FSzValueStats& Stats;
-	bool bRefersToDefaultObject = false; // an object reference applied for the current top-level property points into a class default object
+	UObject* Owner;                // the object being set by a top-level call; null for a struct
+	bool bInstancedValue = false;  // the value being applied belongs to an instanced property
+	bool bForeignInstance = false; // an object reference of an instanced value is unresolved or outside Owner
 };
 
 const TCHAR* KindName(const TSharedPtr<FJsonValue>& V)
@@ -48,11 +51,12 @@ void Mismatch(FApplyCtx& Ctx, const FString& Path, const FString& Expected, cons
 	}
 }
 
-bool IsInsideDefaultObject(const UObject* Obj)
+// Whether Outer lies in the outer chain of Obj.
+bool IsOuterOf(const UObject* Outer, const UObject* Obj)
 {
-	for (const UObject* O = Obj; O; O = O->GetOuter())
+	for (const UObject* O = Obj ? Obj->GetOuter() : nullptr; O; O = O->GetOuter())
 	{
-		if (O->HasAnyFlags(RF_ClassDefaultObject))
+		if (O == Outer)
 		{
 			return true;
 		}
@@ -62,11 +66,47 @@ bool IsInsideDefaultObject(const UObject* Obj)
 
 bool IsSkipped(const FProperty* Prop)
 {
-	return Prop->HasAnyPropertyFlags(CPF_Deprecated | CPF_InstancedReference | CPF_ContainsInstancedReference)
+	return Prop->HasAnyPropertyFlags(CPF_Deprecated)
 		|| CastField<FDelegateProperty>(Prop)
 		|| CastField<FMulticastDelegateProperty>(Prop)
 		|| CastField<FInterfaceProperty>(Prop);
 }
+
+bool IsInstanced(const FProperty* Prop)
+{
+	return Prop->HasAnyPropertyFlags(CPF_InstancedReference | CPF_ContainsInstancedReference);
+}
+
+// The value of a property (all of its elements) as it was before an instanced value was applied; Restore puts it back.
+class FBackedUpValue
+{
+public:
+	FBackedUpValue(FProperty* InProp, void* InData) : Prop(InProp), Data(InData)
+	{
+		Storage = FMemory::Malloc(Prop->GetSize(), Prop->GetMinAlignment());
+		Prop->InitializeValue(Storage);
+		Prop->CopyCompleteValue(Storage, Prop->ContainerPtrToValuePtr<void>(Data));
+	}
+
+	~FBackedUpValue()
+	{
+		Prop->DestroyValue(Storage);
+		FMemory::Free(Storage);
+	}
+
+	FBackedUpValue(const FBackedUpValue&) = delete;
+	FBackedUpValue& operator=(const FBackedUpValue&) = delete;
+
+	void Restore() const
+	{
+		Prop->CopyCompleteValue(Prop->ContainerPtrToValuePtr<void>(Data), Storage);
+	}
+
+private:
+	FProperty* Prop;
+	void* Data;
+	void* Storage = nullptr;
+};
 
 bool ApplyValue(FApplyCtx& Ctx, const FProperty* Property, void* Ptr, const TSharedPtr<FJsonValue>& V, const FString& Path);
 bool ApplyFields(FApplyCtx& Ctx, const UStruct* Struct, void* Data, const TSharedPtr<FJsonObject>& Values, const FString& Path, bool bTop, TArray<FProperty*>* OutApplied);
@@ -142,6 +182,7 @@ bool ApplyValue(FApplyCtx& Ctx, const FProperty* Property, void* Ptr, const TSha
 			Obj = StaticFindObject(ObjProp->PropertyClass, nullptr, *ObjPath);
 			if (!Obj)
 			{
+				Ctx.bForeignInstance |= Ctx.bInstancedValue;
 				if (ObjPath.Contains(TEXT("Default__")))
 				{
 					Ctx.Stats.CdoInternal++;
@@ -153,9 +194,9 @@ bool ApplyValue(FApplyCtx& Ctx, const FProperty* Property, void* Ptr, const TSha
 				return false;
 			}
 		}
-		if (Obj && IsInsideDefaultObject(Obj))
+		if (Obj && Ctx.bInstancedValue && !IsOuterOf(Ctx.Owner, Obj))
 		{
-			Ctx.bRefersToDefaultObject = true;
+			Ctx.bForeignInstance = true;
 		}
 		ObjProp->SetObjectPropertyValue(Ptr, Obj);
 		return true;
@@ -364,9 +405,23 @@ bool ApplyFields(FApplyCtx& Ctx, const UStruct* Struct, void* Data, const TShare
 			bAll = false;
 			continue;
 		}
+		const bool bInstanced = IsInstanced(Prop);
+		if (bInstanced && !Ctx.Owner)
+		{
+			Ctx.Stats.Skipped++;
+			bAll = false;
+			continue;
+		}
 
-		const bool bRefBefore = Ctx.bRefersToDefaultObject;
-		Ctx.bRefersToDefaultObject = false;
+		const bool bInstancedBefore = Ctx.bInstancedValue;
+		const bool bForeignBefore = Ctx.bForeignInstance;
+		TUniquePtr<FBackedUpValue> Backup;
+		if (bInstanced)
+		{
+			Backup = MakeUnique<FBackedUpValue>(Prop, Data);
+		}
+		Ctx.bInstancedValue = bInstancedBefore || bInstanced;
+		Ctx.bForeignInstance = false;
 		bool bOk = true;
 		if (Prop->ArrayDim != 1)
 		{
@@ -391,9 +446,20 @@ bool ApplyFields(FApplyCtx& Ctx, const UStruct* Struct, void* Data, const TShare
 		{
 			bOk = ApplyValue(Ctx, Prop, Prop->ContainerPtrToValuePtr<void>(Data), *Found, PropPath);
 		}
-		const bool bRefHere = Ctx.bRefersToDefaultObject;
-		Ctx.bRefersToDefaultObject = bRefBefore || bRefHere;
+		const bool bForeign = Ctx.bForeignInstance;
+		Ctx.bInstancedValue = bInstancedBefore;
+		Ctx.bForeignInstance = bForeignBefore || (bForeign && !bInstanced);
 
+		if (bForeign && bInstanced)
+		{
+			Backup->Restore();
+			bAll = false;
+			if (bTop)
+			{
+				Ctx.Stats.InstancedForeign++;
+			}
+			continue;
+		}
 		if (!bOk)
 		{
 			bAll = false;
@@ -403,8 +469,12 @@ bool ApplyFields(FApplyCtx& Ctx, const UStruct* Struct, void* Data, const TShare
 			if (bOk)
 			{
 				Ctx.Stats.Applied++;
+				if (bInstanced)
+				{
+					Ctx.Stats.InstancedApplied++;
+				}
 			}
-			if (OutApplied && !bRefHere)
+			if (OutApplied)
 			{
 				OutApplied->Add(Prop);
 			}
@@ -420,6 +490,7 @@ bool SzApplyPropertyValues(const UStruct* Struct, void* Data, const TSharedPtr<F
 	{
 		return false;
 	}
-	FApplyCtx Ctx(Stats);
+	UObject* Owner = Struct->IsA(UClass::StaticClass()) ? static_cast<UObject*>(Data) : nullptr;
+	FApplyCtx Ctx(Stats, Owner);
 	return ApplyFields(Ctx, Struct, Data, Values, Struct->GetPathName(), true, OutApplied);
 }
