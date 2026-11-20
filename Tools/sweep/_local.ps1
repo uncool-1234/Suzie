@@ -52,8 +52,18 @@ function Get-SweepEnv($Project) {
   $dir = Split-Path -Parent (Resolve-Path $Project)
   $loc = Read-Ini (Join-Path $dir 'ModkitData\ModkitLocal.ini')
   $engine = $loc['EngineDir']
-  if (-not $engine) { $ea = (Get-Content $Project -Raw | ConvertFrom-Json).EngineAssociation; if ($ea) { if (-not [IO.Path]::IsPathRooted($ea)) { $ea = Join-Path $dir $ea }; if (Test-Path $ea) { $engine = (Resolve-Path $ea).Path } } }
-  if (-not $engine) { throw 'engine dir unknown: set EngineDir= in ModkitData\ModkitLocal.ini or use a path as EngineAssociation' }
+  if (-not $engine) {
+    $ea = (Get-Content $Project -Raw | ConvertFrom-Json).EngineAssociation
+    if ($ea -and ($ea -match '[\/]' -or $ea.StartsWith('.'))) {
+      $p = if ([IO.Path]::IsPathRooted($ea)) { $ea } else { Join-Path $dir $ea }
+      if (Test-Path $p) { $engine = (Resolve-Path $p).Path }
+    } elseif ($ea) {
+      # A registered engine id: its engine folder is the value of the id under HKCU (written by Register Engine.bat).
+      $reg = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Epic Games\Unreal Engine\Builds' -Name $ea -ErrorAction SilentlyContinue).$ea
+      if ($reg -and (Test-Path $reg)) { $engine = (Resolve-Path $reg).Path }
+    }
+  }
+  if (-not $engine) { throw 'engine dir unknown: set EngineDir= in ModkitData\ModkitLocal.ini, or make EngineAssociation a path or an engine id registered under HKCU\Software\Epic Games\Unreal Engine\Builds' }
   Test-TemplateDrift $dir $loc
   $name = [IO.Path]::GetFileNameWithoutExtension($Project)
   $args = @('-log', '-d3d12', '-sm5', '-nosplash', '-unattended')
