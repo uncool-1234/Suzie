@@ -37,6 +37,7 @@ public class Suzie : ModuleRules
 				"ToolMenus",
 				"MainFrame",
 				"InputCore",
+				"DesktopPlatform",
 			}
 			);
 
