@@ -569,15 +569,15 @@ FState Resolve(const FString& ProfileOverride)
 	Game.Key = TEXT("GameRoot");
 	Game.bFolder = true;
 	Game.bRequired = true;
-	FString GameName;
+	FString GameDescription;
 	const TSharedPtr<FJsonObject>* GameObject = nullptr;
 	if (Spec->TryGetObjectField(TEXT("game"), GameObject))
 	{
-		(*GameObject)->TryGetStringField(TEXT("name"), GameName);
 		(*GameObject)->TryGetStringField(TEXT("probe"), Game.Probe);
+		(*GameObject)->TryGetStringField(TEXT("description"), GameDescription);
 	}
-	Game.Label = (GameName.IsEmpty() ? TEXT("Game") : GameName) + TEXT(" folder");
-	Game.Description = FString::Printf(TEXT("The folder that contains %s"), *Game.Probe);
+	Game.Label = TEXT("Game folder");
+	Game.Description = GameDescription.IsEmpty() ? FString::Printf(TEXT("The folder that contains %s"), *Game.Probe) : GameDescription;
 	Game.Value = Normalize(Ini.FindRef(TEXT("GameRoot")));
 	State.Entries.Add(Game);
 

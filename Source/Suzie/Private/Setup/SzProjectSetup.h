@@ -8,7 +8,7 @@ namespace SzProjectSetup
 	// One path the project needs: the game folder (Key GameRoot) or a file named by the profile's project.json data_files.
 	struct FEntry
 	{
-		FString Key;                   // ini key: GameRoot, or the data file key (KeyFile, Jmap, Usmap)
+		FString Key;                   // ini key: GameRoot, or the data file key (KeyFile, Jmap)
 		FString Label;                 // row label in the window
 		FString Description;           // tooltip only
 		FString Extension;             // data files: extension with dot, e.g. ".txt"
