@@ -35,6 +35,9 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/PathViews.h"
+#include "Misc/App.h"
+#include "Misc/MessageDialog.h"
+#include "CoreGlobals.h"
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 3
 #include "UObject/PropertyOptional.h"
 #endif
@@ -170,6 +173,26 @@ namespace
     }
 }
 
+// Logs the setup problems and, when the editor is interactive, shows them in a dialog. Called once, before a startup return.
+static void ShowSetupDialog(const TArray<FString>& SetupProblems)
+{
+    if (SetupProblems.IsEmpty())
+    {
+        return;
+    }
+    FString Text = TEXT("This project is not set up on this machine:\n\n");
+    for (const FString& Problem : SetupProblems)
+    {
+        Text += FString::Printf(TEXT("- %s\n"), *Problem);
+    }
+    Text += TEXT("\nClose the editor, run \"Setup Project.bat\" in the project folder, and open the project again. Until then the editor runs without the game's content.");
+    UE_LOG(LogSuzie, Warning, TEXT("%s"), *Text);
+    if (GIsEditor && !IsRunningCommandlet() && !FApp::IsUnattended() && !GIsAutomationTesting)
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Text), FText::FromString(TEXT("Modkit project setup")));
+    }
+}
+
 void FSuziePluginModule::StartupModule()
 {
 #if defined(UE_MODKIT_PACKAGE_FILTER)
@@ -195,16 +218,35 @@ void FSuziePluginModule::StartupModule()
     const bool bExplicit = FParse::Param(FCommandLine::Get(), TEXT("SuzieGenerate"));
     FSzProfile Profile;
     const bool bHaveProfile = FSzProfile::Load(Profile, /*bQuiet*/ !bExplicit);
+    TArray<FString> SetupProblems;
     if (!bHaveProfile)
     {
         if (!bExplicit)
         {
+            SetupProblems.Add(FString::Printf(TEXT("%s is missing or has no Profile="), *FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("ModkitData/ModkitLocal.ini")))));
             UE_LOG(LogSuzie, Display, TEXT("Suzie idle: no profile selected (-SuzieProfile=, or Profile= in <Project>/ModkitData/ModkitLocal.ini) and no -SuzieGenerate"));
+            ShowSetupDialog(SetupProblems);
             return;
         }
     }
     else
     {
+        if (Modkit::IsEnabled() && !Modkit::IsActive())
+        {
+            SetupProblems.Add(FString::Printf(TEXT("the modkit profile %s is not active (see the log, LogModkit)"), *Profile.Dir));
+        }
+        else if (Modkit::IsActive())
+        {
+            FAES::FAESKey Key;
+            if (!Modkit::GetAesKey(Key))
+            {
+                SetupProblems.Add(TEXT("no valid AES key file (KeyFile= in ModkitData/ModkitLocal.ini), so the game containers are not mounted"));
+            }
+            else if (Modkit::GetGameConfig().PaksDir.IsEmpty())
+            {
+                SetupProblems.Add(FString::Printf(TEXT("the game folder is not found (GameRoot=%s)"), Modkit::GetGameConfig().GameRoot.IsEmpty() ? TEXT("not set") : *Modkit::GetGameConfig().GameRoot));
+            }
+        }
         for (const FSzProfile::FConflict& Conflict : Profile.ConflictingPlugins)
         {
             const TSharedPtr<IPlugin> Other = IPluginManager::Get().FindPlugin(Conflict.Plugin);
@@ -218,6 +260,7 @@ void FSuziePluginModule::StartupModule()
                 {
                     UE_LOG(LogSuzie, Display, TEXT("Suzie idle: plugin %s is enabled and generates the types of profile '%s' (remove it, or pass -%s)"), *Conflict.Plugin, *Profile.Id, *Conflict.DisableSwitch);
                 }
+                ShowSetupDialog(SetupProblems);
                 return;
             }
         }
@@ -227,11 +270,17 @@ void FSuziePluginModule::StartupModule()
         {
             UE_LOG(LogSuzie, Display, TEXT("Suzie: profile '%s' (%s), generating from jmap %s"), *Profile.Id, *Profile.Dir, *Jmap);
             SuzieCommands::RunGenerateFromModule(Profile);
+            ShowSetupDialog(SetupProblems);
             return;
+        }
+        if (!bHaveJmap)
+        {
+            SetupProblems.Add(FString::Printf(TEXT("the jmap is missing (%s)"), Jmap.IsEmpty() ? TEXT("not set") : *Jmap));
         }
         if (!bExplicit)
         {
             UE_LOG(LogSuzie, Error, TEXT("Suzie idle: profile '%s' needs the game's jmap, %s. Set Jmap=<file> under [Local] in <Project>/ModkitData/ModkitLocal.ini or pass -SuzieJmap=<file>"), *Profile.Id, Jmap.IsEmpty() ? TEXT("none is configured") : *FString::Printf(TEXT("%s does not exist"), *Jmap));
+            ShowSetupDialog(SetupProblems);
             return;
         }
     }
