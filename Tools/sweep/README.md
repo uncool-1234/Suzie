@@ -1,7 +1,7 @@
 Sweep harness (machine independent: nothing here contains a path of the dev PC).
 
 Common arguments: `-Project <path to the .uproject>` (or env `MODKIT_PROJECT`), `-Extra "<more editor args>"`, `-OutDir <dir>` (default `<ProjectDir>\Saved\SuzieSweeps`).
-The engine comes from `[Local] EngineDir=` of `<ProjectDir>\ModkitData\ModkitLocal.ini` (else the path in the .uproject `EngineAssociation`), the key file from `[Local] KeyFile=`
+The engine comes from `[Local] EngineDir=` of `<ProjectDir>\ModkitData\ModkitLocal.ini` when it is set, else from the .uproject `EngineAssociation` (a path, or an engine id registered under `HKCU\Software\Epic Games\Unreal Engine\Builds`), the key file from `[Local] KeyFile=`
 (only its path is passed as `-ModkitKeyFile=`). The DDC is isolated per project (`<ProjectDir>\DDC`). One editor at a time (GPU, DDC, project lock).
 
 - `run_gates.ps1 -Tag t [-OldGolden file]`: golden dump + Blueprint sweep + material sweep, writes `<Tag>.summary.json`.
