@@ -156,6 +156,10 @@ namespace
 		{
 			Items.Add(TEXT("no profile selected"));
 		}
+		else if (!State.bProfileInIni)
+		{
+			Items.Add(TEXT("Profile: not set"));
+		}
 		for (const FEntry& E : State.Entries)
 		{
 			if (E.bValid)
@@ -390,15 +394,19 @@ namespace
 		];
 		Row->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(10, 0, 0, 0)
 		[
-			SNew(STextBlock)
-			.Text_Lambda([Form, Index]() -> FText
-			{
-				return FText::FromString(Form->State.Entries[Index].bValid ? TEXT("valid") : TEXT("invalid"));
-			})
-			.ColorAndOpacity_Lambda([Form, Index]() -> FSlateColor
-			{
-				return Form->State.Entries[Index].bValid ? FSlateColor(FLinearColor(0.25f, 0.7f, 0.3f)) : FSlateColor(FLinearColor(0.85f, 0.25f, 0.2f));
-			})
+			SNew(SBox)
+			.WidthOverride(48.0f)
+			[
+				SNew(STextBlock)
+				.Text_Lambda([Form, Index]() -> FText
+				{
+					return FText::FromString(Form->State.Entries[Index].bValid ? TEXT("valid") : TEXT("invalid"));
+				})
+				.ColorAndOpacity_Lambda([Form, Index]() -> FSlateColor
+				{
+					return Form->State.Entries[Index].bValid ? FSlateColor(FLinearColor(0.25f, 0.7f, 0.3f)) : FSlateColor(FLinearColor(0.85f, 0.25f, 0.2f));
+				})
+			]
 		];
 		return Row;
 	}
@@ -524,6 +532,7 @@ FState Resolve(const FString& ProfileOverride)
 
 	const FString Override = Normalize(ProfileOverride);
 	const FString IniProfile = Normalize(Ini.FindRef(TEXT("Profile")));
+	State.bProfileInIni = IsProfileDir(IniProfile);
 	if (!Override.IsEmpty())
 	{
 		if (IsProfileDir(Override))

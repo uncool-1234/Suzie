@@ -27,6 +27,7 @@ namespace SzProjectSetup
 		TArray<FString> ProfileChoices;    // every profile folder found under the Suzie plugin's Profiles
 		TArray<FEntry> Entries;            // [0] is the game folder, then the profile's data files
 		bool bComplete = false;            // profile chosen and every entry valid
+		bool bProfileInIni = false;        // ModkitLocal.ini names a valid profile folder (the engine reads it before plugins load)
 		FString Summary;                   // what is missing, for the log
 	};
 

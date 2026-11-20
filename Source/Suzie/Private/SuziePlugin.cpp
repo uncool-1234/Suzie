@@ -198,7 +198,7 @@ void FSuziePluginModule::StartupModule()
     }
 
     SzProjectSetup::FState Setup = SzProjectSetup::Resolve();
-    if (!Setup.bComplete)
+    if (!Setup.bComplete || !Setup.bProfileInIni)
     {
         UE_LOG(LogSuzie, Warning, TEXT("Modkit project setup: %s"), *Setup.Summary);
         if (Modkit::IsEnabled() && !Setup.ProfileChoices.IsEmpty() && GIsEditor && !IsRunningCommandlet() && !FApp::IsUnattended() && !GIsAutomationTesting)
