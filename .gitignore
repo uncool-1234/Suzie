@@ -1,7 +1,4 @@
 /Binaries
 /Intermediate
 __pycache__/
-/Profiles/*/Plugin/*/Binaries
-/Profiles/*/Plugin/*/Intermediate
 /ModkitLocal.ini
-/Profiles/*/data/golden/

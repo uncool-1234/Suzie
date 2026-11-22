@@ -2,7 +2,7 @@
 
 ## This fork
 
-This fork is used by the Game modkit in profile driven mode. The generic code in `Source/Suzie` generates a game's native enums, structs, classes and delegates in memory at every editor start from the game's jmap (`-SuzieJmap=<file>`, else `[Local] Jmap=` in `<Project>/ModkitData/ModkitLocal.ini`). Everything game specific lives in a profile directory. The Game profile is `Profiles/Game`; see [Profiles/Game/README.md](Profiles/Game/README.md). Generation runs at editor start when a profile is selected (`ModkitData/ModkitLocal.ini [Local] Profile=`, or `-SuzieProfile=`).
+This fork runs in profile driven mode. The generic code in `Source/Suzie` generates a game's native enums, structs, classes and delegates in memory at every editor start from the game's jmap (`-SuzieJmap=<file>`, else `[Local] Jmap=` in `<Project>/ModkitData/ModkitLocal.ini`). Everything game specific lives in a profile directory, which is not part of this repository: a profile folder named by `ModkitData/ModkitLocal.ini [Local] Profile=` or `-SuzieProfile=<dir>`, or a folder under this plugin's `Profiles` (`-SuzieProfile=<name>`; an installed build places its profile there). Generation runs at editor start when a profile is selected.
 
 The `docs` folder of the modkit workspace describes the whole modkit: `profile-format.md`, `native-type-generation.md`, `schema-shadow-properties.md` and the others.
 
