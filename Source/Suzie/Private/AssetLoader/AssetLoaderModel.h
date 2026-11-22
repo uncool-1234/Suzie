@@ -73,7 +73,7 @@ public:
 	bool GetLoadDependencies() const;
 	void SetLoadDependencies(bool bLoad);
 
-	/** The filter that Apply writes; see the per mode rules in the Suzie Asset Loader documentation. */
+	/** The filter that Apply writes; the per mode rules are in FAssetLoaderModel::ComputeFilter (AssetLoaderModel.cpp). */
 	FAssetFilter ComputeFilter() const;
 
 	/** Apply is refused only when OnlySelected has no selection. */

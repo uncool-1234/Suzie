@@ -2,13 +2,11 @@
 
 ## This fork
 
-This fork runs in profile driven mode. The generic code in `Source/Suzie` generates a game's native enums, structs, classes and delegates in memory at every editor start from the game's jmap (`-SuzieJmap=<file>`, else `[Local] Jmap=` in `<Project>/ModkitData/ModkitLocal.ini`). Everything game specific lives in a profile directory, which is not part of this repository: a profile folder named by `ModkitData/ModkitLocal.ini [Local] Profile=` or `-SuzieProfile=<dir>`, or a folder under this plugin's `Profiles` (`-SuzieProfile=<name>`; an installed build places its profile there). Generation runs at editor start when a profile is selected.
-
-The `docs` folder of the modkit workspace describes the whole modkit: `profile-format.md`, `native-type-generation.md`, `schema-shadow-properties.md` and the others.
+This fork targets Unreal Engine 5.7.4 and adds a profile driven generator: at every editor start it generates a game's native enums, structs, classes and delegates in memory from the game's jmap. Everything game specific lives in a **profile** folder, which is not part of this repository; a game's profile is maintained with that game's modding project. How it works, how to select a profile and what a profile folder holds: [Profile driven generator](#profile-driven-generator-this-repository) below.
 
 ## Upstream jmap route
 
-The section below is the upstream Suzie instruction set. It runs only with `-SuzieGenerate`: when no profile is selected, when the profile has no jmap configured, or with `-SuzieUpstreamJmap` (which also needs `-SuzieGenerate`). See `FSuziePluginModule::StartupModule` in `Source/Suzie/Private/SuziePlugin.cpp`.
+The rest of this section and the installation steps are the upstream Suzie instructions (Content/DynamicClasses, a project named like the game). In this fork that route runs only with `-SuzieGenerate`: when no profile is selected, when the profile has no jmap configured, or with `-SuzieUpstreamJmap` (which also needs `-SuzieGenerate`). See `FSuziePluginModule::StartupModule` in `Source/Suzie/Private/SuziePlugin.cpp`.
 
 Suzie is an Unreal Engine plugin that dynamically generates UHT (Unreal Header Tool) classes at editor runtime from dumped game class definitions. This allows working with game classes in Blueprint without having to generate headers and recompile if changed.
 
@@ -78,15 +76,30 @@ git clone https://github.com/trumank/Suzie
 
 ## Profile driven generator (this repository)
 
-Next to the jmap route above, `Source/Suzie/Private/Gen` contains a generic, profile driven generator. Everything game specific lives in a **profile** directory (`Profiles/<Game>/`); `Source/` contains no game names (`Tools/check-layers.ps1`).
+Next to the jmap route above, `Source/Suzie/Private/Gen` contains a generic, profile driven generator. Everything game specific lives in a **profile** folder outside this repository; this repository contains no game names (`Tools/check-layers.ps1`).
 
 - **Derivation from the jmap**: Suzie parses the game's jmap (about 8 s for a 180 MB file), compares it with the live editor reflection and derives every enum, struct, class and delegate the editor lacks (properties with exact flags, struct sizes, interfaces, default subobjects). Generation takes about 0.8 s (`Suzie.GenerateNativeTypes`). No intermediate file exists.
-- **Selecting a profile**: `<Project>/ModkitData/ModkitLocal.ini [Local] Profile=<profile folder>` (the folder that holds `profile.json` and `engine.ini`) or `-SuzieProfile=<name|dir>`. With a profile selected and a jmap configured, generation runs at startup without a switch, unless a plugin listed in the profile's `conflicting_plugins` is enabled; without a jmap Suzie logs an error and generates nothing. `-DisableSuzie` turns it off. Without a profile Suzie idles (`-SuzieGenerate` still runs the upstream jmap route).
-- **Shadow recipes**: engine types whose game layout differs get a recipe derived from the same jmap comparison at startup; the engine's unversioned schema hook reads the members the engine lacks into a temporary and discards them. This needs the `modkit-core` engine branch (`UObject/UnversionedSchemaOverride.h`); without it the plugin still compiles (the hooks are probed at compile time).
+- **Selecting a profile**: `<Project>/ModkitData/ModkitLocal.ini [Local] Profile=<profile folder>` (the folder that holds `profile.json` and `engine.ini`) or `-SuzieProfile=<dir>`; `-SuzieProfile=<name>` looks in this plugin's `Profiles` folder (none ship with this repository; an installed engine build can carry one there). The jmap comes from `-SuzieJmap=<file>` or `[Local] Jmap=` of the same file. The editor's **Modkit project setup** window writes `ModkitLocal.ini`: it opens when a path is missing or invalid (`Source/Suzie/Private/Setup/SzProjectSetup.cpp`; console command `Suzie.ProjectSetup`). With a profile selected and a jmap configured, generation runs at startup without a switch, unless a plugin listed in the profile's `conflicting_plugins` is enabled; without a jmap Suzie logs an error and generates nothing. `-DisableSuzie` turns it off. Without a profile Suzie idles (`-SuzieGenerate` still runs the upstream jmap route).
+- **Shadow recipes**: engine types whose game layout differs get a recipe derived from the same jmap comparison at startup; the engine's unversioned schema hook reads the members the engine lacks into a temporary and discards them. This needs an engine with the unversioned schema override hook (`UObject/UnversionedSchemaOverride.h`, not in stock Unreal Engine); without it the plugin still compiles (the hooks are probed at compile time) and shadow recipes are off.
 - **Game extension** (`SuzieExtension.h`): code that cannot be data (a struct with hand written serialization, handlers for data a game appends after the reflected part of an export) comes from a small plugin module named by the profile (`extension_module`), bound by name in `load/native_ops.json` and `load/skip.json`.
 - **Gameplay tags**: the game's tag list and redirects are written from the jmap to the project's config files at startup.
 - **Verification**: `Suzie.VerifyNativeTypes`, `Suzie.DumpClass`, `Suzie.DumpAll`, `Suzie.TagInfo`, and the sweep harness in `Tools/sweep`.
 
-Documentation lives in the workspace's `docs` folder (`profile-format.md`, `native-type-generation.md`, `schema-shadow-properties.md`).
+### Profile folder
+
+| File | Read by | Purpose |
+|---|---|---|
+| `profile.json` | Suzie | entry point: `id`, `description`, paths of the data files below, `extension_module`, `conflicting_plugins` (relative paths resolve against the folder) |
+| `engine.ini` | the engine's modkit hooks | container probing, index cipher steps, shader library, layout tolerance, plugin content roots |
+| `project.json` | Modkit project setup window | `engine_id`, the data files a project folder holds (key file, jmap) and the game folder probe |
+| `schema/aliases.json` | Suzie | game type path to editor type path |
+| `schema/overrides.json` | Suzie | generation policy: abstract rules, flags, row structs |
+| `load/skip.json` | Suzie | exports skipped on load; post-serialize handlers provided by the extension |
+| `load/native_ops.json` | Suzie | structs whose C++ struct ops come from the extension |
+| `tags/tags.json` | Suzie | project relative path of the written tag list, probe tag |
+| `sweeps/`, `data/golden/` | `Tools/sweep` | optional test references: asset lists and a golden `Suzie.DumpAll` dump |
+| `Plugin/<Module>` | UE | the extension plugin named by `extension_module` |
+
+A profile may hold further files that its engine or packaging scripts read.
 
 License: MIT (see LICENSE). Based on [trumank/Suzie](https://github.com/trumank/Suzie).

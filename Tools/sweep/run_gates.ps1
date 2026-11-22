@@ -3,7 +3,7 @@
 #   golden   one editor start: verify, tags, Suzie.DumpAll; log excerpt: override counters, verify totals
 #   bp       Blueprint/AnimBP/Widget load sweep (the single blueprints_*.list in the sweeps folder)
 #   mat      material / MIC sweep (the single materials_*.list in the sweeps folder)
-# Expected values are in the profile's README.
+# Expected values belong to the profile (its README or notes).
 # Machine independent: project from -Project / $env:MODKIT_PROJECT, lists from -Sweeps (default: <Profile>\sweeps, Profile= of the project's ModkitLocal.ini).
 param($Tag, $Project = "", $OutDir = "", $Extra = "", $OldGolden = "", $Sweeps = "", [string[]]$Skip = @())
 . "$PSScriptRoot\_local.ps1"
