@@ -87,6 +87,6 @@ Next to the jmap route above, `Source/Suzie/Private/Gen` contains a generic, pro
 - **Gameplay tags**: the game's tag list and redirects are written from the jmap to the project's config files at startup.
 - **Verification**: `Suzie.VerifyNativeTypes`, `Suzie.DumpClass`, `Suzie.DumpAll`, `Suzie.TagInfo`, and the sweep harness in `Tools/sweep`.
 
-Documentation lives in the workspace folder `<path>` (`profile-format.md`, `native-type-generation.md`, `schema-shadow-properties.md`).
+Documentation lives in the workspace's `docs` folder (`profile-format.md`, `native-type-generation.md`, `schema-shadow-properties.md`).
 
-License: MIT (see LICENSE and NOTICE of the upstream project).
+License: MIT (see LICENSE). Based on [trumank/Suzie](https://github.com/trumank/Suzie).
