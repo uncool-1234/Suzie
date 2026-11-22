@@ -1,7 +1,8 @@
-# Separation rule: no game/studio name in any tracked file of this repository (this script excepted). Exit 1 on a hit.
+# Separation rule: no game or studio name in any tracked file of this repository. Exit 1 on a hit.
+# -Pattern: regular expression of the names (the game's modkit repository supplies it).
+param([Parameter(Mandatory = $true)][string]$Pattern)
 $root = Split-Path $PSScriptRoot
-$self = 'Tools/check-layers.ps1'
-$files = @(git -C $root ls-files | Where-Object { $_ -ne $self } | ForEach-Object { Join-Path $root $_ })
-$hits = Select-String -LiteralPath $files -Pattern 'Game|Studio|Game|Game|Studio'
+$files = @(git -C $root ls-files | ForEach-Object { Join-Path $root $_ })
+$hits = Select-String -LiteralPath $files -Pattern $Pattern
 if ($hits) { $hits | % { "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }; exit 1 }
 "check-layers: clean ($($files.Count) files)"
