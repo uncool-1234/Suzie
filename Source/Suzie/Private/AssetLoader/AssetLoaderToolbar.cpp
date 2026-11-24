@@ -19,15 +19,27 @@ namespace
 	const FName GToolMenuOwner(TEXT("SuzieAssetLoader"));
 	const FName GLevelToolbarUserMenu(TEXT("LevelEditor.LevelEditorToolBar.User"));
 
+	FText NonVanillaTooltipSuffix()
+	{
+#if defined(UE_MODKIT_CONTAINER_FILTER)
+		if (Modkit::ShouldMountNonVanillaContainers())
+		{
+			return LOCTEXT("ButtonTooltipNonVanilla", ", non-vanilla pakchunks mounted");
+		}
+#endif
+		return FText::GetEmpty();
+	}
+
 	void RegisterToolbarButton()
 	{
 		FToolMenuOwnerScoped OwnerScoped(GToolMenuOwner);
 		UToolMenu* Menu = UToolMenus::Get()->ExtendMenu(GLevelToolbarUserMenu);
 		FToolMenuSection& Section = Menu->FindOrAddSection(TEXT("AssetLoader"));
 		const FText ToolTip = FText::Format(
-			LOCTEXT("ButtonTooltip", "Choose which game assets the editor loads. Current: {0} ({1} packages listed)."),
+			LOCTEXT("ButtonTooltip", "Choose which game assets the editor loads. Current: {0} ({1} packages listed{2})."),
 			SzAssetLoader::DescribeFilterMode(GSessionFilter),
-			FText::AsNumber(GSessionPackageCount));
+			FText::AsNumber(GSessionPackageCount),
+			NonVanillaTooltipSuffix());
 		FToolMenuEntry& Entry = Section.AddEntry(FToolMenuEntry::InitToolBarButton(
 			FName(TEXT("AssetLoader.Open")),
 			FUIAction(FExecuteAction::CreateStatic(&SzAssetLoader::OpenWindow)),
@@ -54,6 +66,9 @@ void SzAssetLoader::Startup()
 			UE_LOG(LogSuzie, Warning, TEXT("Asset Loader: %s"), *Error);
 		}
 	}
+#if defined(UE_MODKIT_CONTAINER_FILTER)
+	GSessionFilter.bMountNonVanillaContainers = Modkit::ShouldMountNonVanillaContainers();
+#endif
 	GStartupHandle = UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateStatic(&RegisterToolbarButton));
 }
 
@@ -87,7 +102,8 @@ const FAssetFilter& SzAssetLoader::GetSessionFilter()
 
 bool SzAssetLoader::IsSameAsSessionFilter(const FAssetFilter& Filter)
 {
-	return Filter.Mode == GSessionFilter.Mode && Filter.Packages == GSessionFilter.Packages;
+	return Filter.Mode == GSessionFilter.Mode && Filter.Packages == GSessionFilter.Packages
+		&& Filter.bMountNonVanillaContainers == GSessionFilter.bMountNonVanillaContainers;
 }
 
 FText SzAssetLoader::DescribeFilterMode(const FAssetFilter& Filter)

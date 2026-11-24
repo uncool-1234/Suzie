@@ -144,15 +144,36 @@ public:
 			.AutoHeight()
 			.Padding(8.f, 4.f)
 			[
-				SNew(SCheckBox)
-				.IsChecked(this, &SAssetLoaderWindow::GetLoadDependenciesState)
-				.OnCheckStateChanged(this, &SAssetLoaderWindow::OnLoadDependenciesChanged)
-				.IsEnabled(this, &SAssetLoaderWindow::IsOnlySelectedMode)
-				.ToolTipText(LOCTEXT("LoadDependenciesTip", "Also load every package the selected assets depend on (hard references), so selected materials keep their parents and textures."))
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
 				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("LoadDependencies", "Load dependencies"))
+					SNew(SCheckBox)
+					.IsChecked(this, &SAssetLoaderWindow::GetLoadDependenciesState)
+					.OnCheckStateChanged(this, &SAssetLoaderWindow::OnLoadDependenciesChanged)
+					.IsEnabled(this, &SAssetLoaderWindow::IsOnlySelectedMode)
+					.ToolTipText(LOCTEXT("LoadDependenciesTip", "Also load every package the selected assets depend on (hard references), so selected materials keep their parents and textures."))
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("LoadDependencies", "Load dependencies"))
+					]
 				]
+#if defined(UE_MODKIT_CONTAINER_FILTER)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.Padding(16.f, 0.f, 0.f, 0.f)
+				[
+					SNew(SCheckBox)
+					.IsChecked(this, &SAssetLoaderWindow::GetMountNonVanillaState)
+					.OnCheckStateChanged(this, &SAssetLoaderWindow::OnMountNonVanillaChanged)
+					.IsEnabled(this, &SAssetLoaderWindow::IsMountNonVanillaEnabled)
+					.ToolTipText(this, &SAssetLoaderWindow::GetMountNonVanillaTooltip)
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("MountNonVanilla", "Mount non-vanilla pakchunks"))
+					]
+				]
+#endif
 			]
 			+ SVerticalBox::Slot()
 			.AutoHeight()
@@ -463,6 +484,30 @@ private:
 	{
 		Model->SetLoadDependencies(NewState == ECheckBoxState::Checked);
 	}
+
+#if defined(UE_MODKIT_CONTAINER_FILTER)
+	ECheckBoxState GetMountNonVanillaState() const
+	{
+		return Model->GetMountNonVanillaContainers() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+	}
+
+	void OnMountNonVanillaChanged(ECheckBoxState NewState)
+	{
+		Model->SetMountNonVanillaContainers(NewState == ECheckBoxState::Checked);
+	}
+
+	bool IsMountNonVanillaEnabled() const
+	{
+		return Modkit::HasVanillaContainerList();
+	}
+
+	FText GetMountNonVanillaTooltip() const
+	{
+		return Modkit::HasVanillaContainerList()
+			? LOCTEXT("MountNonVanillaTip", "Also mount containers in the game's Paks folder that are not in the profile's vanilla list, such as installed mods.")
+			: LOCTEXT("MountNonVanillaNoList", "The profile lists no vanilla containers; every container is mounted.");
+	}
+#endif
 
 	// Lists: both are projections of the model, rebuilt when the mode, a search or the selection changes
 

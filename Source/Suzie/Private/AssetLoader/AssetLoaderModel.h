@@ -31,6 +31,7 @@ struct FAssetFilter
 {
 	EAssetFilterMode Mode = EAssetFilterMode::Off;
 	TArray<FName> Packages;
+	bool bMountNonVanillaContainers = false;
 };
 
 /** One row of the game asset list. */
@@ -73,6 +74,10 @@ public:
 	bool GetLoadDependencies() const;
 	void SetLoadDependencies(bool bLoad);
 
+	/** Containers in the game's Paks folder that are not in the profile's vanilla list are mounted. Independent of the mode. */
+	bool GetMountNonVanillaContainers() const;
+	void SetMountNonVanillaContainers(bool bMount);
+
 	/** The filter that Apply writes; the per mode rules are in FAssetLoaderModel::ComputeFilter (AssetLoaderModel.cpp). */
 	FAssetFilter ComputeFilter() const;
 
@@ -111,6 +116,7 @@ private:
 	EAssetLoadMode Mode = EAssetLoadMode::OnlySelected;
 	TSet<FName> Selected;
 	bool bLoadDependencies = true;
+	bool bMountNonVanillaContainers = false;
 };
 
 #endif

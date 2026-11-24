@@ -4,6 +4,7 @@
 
 #include "AssetRegistry/IAssetRegistry.h"
 #include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
@@ -140,6 +141,17 @@ bool FAssetLoaderModelTest::RunTest(const FString& Parameters)
 	Model.InitializeFromFilter(FAssetFilter());
 	TestEqual(TEXT("Off starts All"), static_cast<int32>(Model.GetMode()), static_cast<int32>(EAssetLoadMode::All));
 
+	// MountNonVanillaContainers is kept in every mode.
+	Model.SetMountNonVanillaContainers(true);
+	for (const EAssetLoadMode Candidate : { EAssetLoadMode::All, EAssetLoadMode::OnlySelected, EAssetLoadMode::AllExceptSelected, EAssetLoadMode::None })
+	{
+		Model.SetMode(Candidate);
+		TestTrue(*FString::Printf(TEXT("ComputeFilter keeps the container flag in mode %s"), *FAssetLoaderModel::ModeName(Candidate)), Model.ComputeFilter().bMountNonVanillaContainers);
+	}
+	Model.SetMountNonVanillaContainers(false);
+	TestFalse(TEXT("ComputeFilter writes the container flag as false when it is off"), Model.ComputeFilter().bMountNonVanillaContainers);
+	Model.SetMode(EAssetLoadMode::AllExceptSelected);
+
 	// Filter file round trip.
 	const FString FilterPath = TempFile(TEXT("AssetFilter.txt"));
 	FString Error;
@@ -150,10 +162,32 @@ bool FAssetLoaderModelTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("filter file round trip packages"), Read.Packages == DenyFilter.Packages);
 	TestTrue(TEXT("filter file has no temporary file left"), !IFileManager::Get().FileExists(*(FilterPath + TEXT(".tmp"))));
 
+	// The container flag in the filter file, true and false; a file without the line reads false.
+	FAssetFilter FlagFilter = DenyFilter;
+	FlagFilter.bMountNonVanillaContainers = true;
+	TestTrue(TEXT("filter file with the container flag written"), FAssetLoaderModel::WriteFilterFile(FilterPath, FlagFilter, Error));
+	FAssetFilter ReadFlagTrue;
+	TestTrue(TEXT("filter file with the container flag read"), FAssetLoaderModel::ReadFilterFile(FilterPath, ReadFlagTrue, Error));
+	TestTrue(TEXT("container flag true round trips"), ReadFlagTrue.bMountNonVanillaContainers);
+	TestTrue(TEXT("the container flag line is not a package"), ReadFlagTrue.Packages == DenyFilter.Packages);
+	FlagFilter.bMountNonVanillaContainers = false;
+	TestTrue(TEXT("filter file with the container flag false written"), FAssetLoaderModel::WriteFilterFile(FilterPath, FlagFilter, Error));
+	FAssetFilter ReadFlagFalse;
+	TestTrue(TEXT("filter file with the container flag false read"), FAssetLoaderModel::ReadFilterFile(FilterPath, ReadFlagFalse, Error));
+	TestFalse(TEXT("container flag false round trips"), ReadFlagFalse.bMountNonVanillaContainers);
+	const FString NoFlagPath = TempFile(TEXT("AssetFilterNoFlag.txt"));
+	TestTrue(TEXT("filter file without the container line written"), FFileHelper::SaveStringToFile(TEXT("Mode=Off\n"), *NoFlagPath));
+	FAssetFilter NoFlag;
+	NoFlag.bMountNonVanillaContainers = true;
+	TestTrue(TEXT("filter file without the container line read"), FAssetLoaderModel::ReadFilterFile(NoFlagPath, NoFlag, Error));
+	TestFalse(TEXT("a filter file without the container line reads false"), NoFlag.bMountNonVanillaContainers);
+	IFileManager::Get().Delete(*NoFlagPath);
+
 	// JSON state round trip.
 	const FString StatePath = TempFile(TEXT("AssetLoader.json"));
 	Model.SetMode(EAssetLoadMode::OnlySelected);
 	Model.SetLoadDependencies(true);
+	Model.SetMountNonVanillaContainers(true);
 	Model.SetSelected(FName(MaterialPackage), true);
 	Model.SetSelected(FName(TexturePackage), true);
 	TestTrue(TEXT("state written"), Model.SaveState(StatePath, Error));
@@ -163,6 +197,13 @@ bool FAssetLoaderModelTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("state round trip mode"), static_cast<int32>(Reloaded.GetMode()), static_cast<int32>(EAssetLoadMode::OnlySelected));
 	TestTrue(TEXT("state round trip dependency flag"), Reloaded.GetLoadDependencies());
 	TestTrue(TEXT("state round trip selection"), Sorted(Reloaded.GetSelected().Array()) == Sorted(Model.GetSelected().Array()));
+	TestTrue(TEXT("state round trip container flag"), Reloaded.GetMountNonVanillaContainers());
+	const FString NoKeyStatePath = TempFile(TEXT("AssetLoaderNoKey.json"));
+	TestTrue(TEXT("state without the container key written"), FFileHelper::SaveStringToFile(TEXT("{\"mode\":\"All\"}"), *NoKeyStatePath));
+	Reloaded.SetMountNonVanillaContainers(true);
+	TestTrue(TEXT("state without the container key read"), Reloaded.LoadState(NoKeyStatePath));
+	TestFalse(TEXT("a missing container key reads false"), Reloaded.GetMountNonVanillaContainers());
+	IFileManager::Get().Delete(*NoKeyStatePath);
 	TestFalse(TEXT("a missing state file is not loaded"), Reloaded.LoadState(TempFile(TEXT("Missing.json"))));
 
 	IFileManager::Get().Delete(*FilterPath);
